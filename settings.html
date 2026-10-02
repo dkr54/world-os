@@ -1,0 +1,173 @@
+<div id="floor-memory" class="floor-memory">
+  <div class="inline-drawer">
+    <div class="inline-drawer-toggle inline-drawer-header">
+      <b>楼层记忆 · Floor Memory</b>
+      <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+    </div>
+    <div class="inline-drawer-content">
+      <p class="fm-intro">把回复中的总结变成长期记忆。每条模型回复及其前面的用户消息算一楼。</p>
+      <p id="fm-runtime" class="fm-hint"></p>
+        <form id="fm-form">
+        <label class="checkbox_label"><input type="checkbox" name="enabled">启用楼层记忆</label>
+        <div class="fm-flow" aria-label="上下文从旧到新的顺序"><span>更早 K 楼召回</span><span>→</span><span>中间 M 楼总结</span><span>→</span><span>最近 N 楼原文</span></div>
+        <div class="fm-grid">
+          <label>最近原文 N<input class="text_pole" type="number" name="recentCount" min="0" max="10000" required></label>
+          <label>中间总结 M<input class="text_pole" type="number" name="middleCount" min="0" max="10000" required></label>
+          <label>更早召回 K<input class="text_pole" type="number" name="recallCount" min="0" max="10000" required></label>
+        </div>
+        <p class="fm-hint">中间总结和历史召回均保留对应楼层的用户消息，仅替换模型回复。尚未得到回复的用户消息始终保留。续写时至少保留正在续写的一楼。K 是召回上限。</p>
+        <label>中间 M 楼缺少总结时
+          <select class="text_pole" name="missingSummary"><option value="original">保留这一整楼原文</option><option value="omit">保留用户消息，略过模型回复</option></select>
+        </label>
+        <details open>
+          <summary>① 正则：先清洗，再提取</summary>
+          <p class="fm-hint">规则按列表顺序执行，只处理提取用的副本。最近 N 楼原文不受这些规则影响。支持 JavaScript 正则、替换中的 $1 和 /pattern/flags 写法。</p>
+          <div id="fm-cleanup-rules"></div>
+          <button class="menu_button" type="button" id="fm-add-rule">＋ 添加清洗规则</button>
+          <label>获取总结的正则<textarea class="text_pole fm-code" name="extractPattern" rows="3" spellcheck="false"></textarea></label>
+          <div class="fm-grid fm-grid-two">
+            <label>标志 flags<input class="text_pole fm-code" name="extractFlags" placeholder="gi" spellcheck="false"></label>
+            <label>捕获组（数字或名称）<input class="text_pole fm-code" name="extractGroup" placeholder="1" required></label>
+          </div>
+          <p class="fm-hint">默认提取 &lt;summary&gt;…&lt;/summary&gt; 的第 1 组；可改成你的总结标签。多个匹配以空行连接。0 表示完整匹配。</p>
+          <details>
+            <summary>测试当前正则（无需保存）</summary>
+            <textarea id="fm-regex-input" class="text_pole" rows="5" placeholder="粘贴一条包含 thinking、content、summary 等标签的完整回复"></textarea>
+            <button class="menu_button" type="button" id="fm-test-regex">测试清洗与提取</button>
+            <pre id="fm-regex-output" class="fm-output" aria-live="polite"></pre>
+          </details>
+        </details>
+        <details open>
+          <summary>② 关键词优先</summary>
+          <label class="checkbox_label"><input type="checkbox" name="keywordEnabled">启用关键词召回</label>
+          <label>查询最近几条用户消息 D（含中间模型回复）<input class="text_pole" type="number" name="queryFloors" min="0" max="10000" required></label>
+          <p class="fm-hint">从最新第 1 条用户消息往上，取到第 D 条用户消息，包含两者之间的全部模型回复。D=2 即“上条用户消息 → 中间模型回复 → 最新用户消息”；D=0 只取尚未得到回复的用户消息。</p>
+          <p class="fm-hint">只匹配下方为每楼手动设置的触发关键词，任意一个词命中即可召回。留空的楼层不参与关键词匹配；关键词结果不足 K 时，它们与其他未命中楼层一起参与向量召回。</p>
+        </details>
+        <details id="fm-embedding-panel">
+          <summary>③ 独立 Embedding 接口</summary>
+          <label class="checkbox_label"><input type="checkbox" name="vectorEnabled">关键词不足 K 楼时，用向量补足</label>
+          <label>API 地址<input class="text_pole fm-code" type="url" name="endpoint" placeholder="https://your-provider.example/v1" spellcheck="false"></label>
+          <p class="fm-hint">填写 API 根地址（通常含 /v1）或完整 /embeddings 地址。从当前设备请求，服务需允许 CORS；HTTPS 页面不能访问普通 HTTP 服务。手机连接电脑上的接口时请使用电脑的局域网地址。</p>
+          <label>API Key<input class="text_pole fm-code" type="password" name="apiKey" autocomplete="off" placeholder="本地免密服务可留空"></label>
+          <div class="fm-actions"><button class="menu_button" type="button" id="fm-load-models">拉取／刷新模型列表</button></div>
+          <label>从接口模型列表中选择<select id="fm-model-select" class="text_pole" disabled><option value="">请先拉取模型列表</option></select></label>
+          <p id="fm-model-status" class="fm-hint" role="status" aria-live="polite">完成地址和密钥输入后自动拉取，也可以点击刷新。使用当前表单内容，无需先保存；本地免密接口可留空密钥。</p>
+          <label>Embedding 模型（也可手动填写）<input class="text_pole fm-code" name="model" placeholder="从列表选择，或填写服务商提供的模型名称" spellcheck="false"></label>
+          <p class="fm-hint">接口返回的列表可能包含聊天模型，请选择支持 Embedding 的模型。</p>
+          <label class="checkbox_label"><input type="checkbox" name="rememberKey">将密钥明文保存到 扩展设置</label>
+          <p class="fm-hint">默认仅在当前页面／应用会话中保存密钥。总结和查询会发送给所填接口；向量留在当前设备，不写进聊天文件。</p>
+          <div class="fm-grid">
+            <label>每批条数<input class="text_pole" type="number" name="batchSize" min="1" max="128" required></label>
+            <label>超时（秒）<input class="text_pole" type="number" name="timeoutSeconds" min="1" max="180" required></label>
+            <label>相似度下限<input class="text_pole" type="number" name="similarityThreshold" min="-1" max="1" step="0.01" required></label>
+          </div>
+          <div class="fm-actions">
+            <button class="menu_button" type="button" id="fm-test-embedding">测试已保存的接口</button>
+            <button class="menu_button" type="button" id="fm-index">建立／更新本聊天向量</button>
+            <button class="menu_button" type="button" id="fm-clear-index">清空本聊天向量缓存</button>
+          </div>
+        </details>
+        <details id="fm-rerank-panel">
+          <summary>④ 可选 Rerank 重排</summary>
+          <label class="checkbox_label"><input type="checkbox" name="rerankEnabled">对向量候选重排，再补足 K 楼</label>
+          <p class="fm-hint">关键词仍优先。仅在需要向量补足、且候选多于剩余名额时请求重排；会增加一次请求，失败时按原向量相似度召回。</p>
+          <label>Rerank API 地址<input class="text_pole fm-code" type="url" name="rerankEndpoint" placeholder="https://your-provider.example/v1/rerank" spellcheck="false"></label>
+          <p class="fm-hint">支持 Cohere / Jina 格式的 /rerank 接口。填写完整地址或带版本的 API 根地址；服务需允许页面跨域访问。</p>
+          <label>Rerank API Key<input class="text_pole fm-code" type="password" name="rerankApiKey" autocomplete="off" placeholder="本地免密服务可留空"></label>
+          <div class="fm-actions"><button class="menu_button" type="button" id="fm-rerank-load-models">拉取／刷新模型列表</button></div>
+          <label>从重排接口模型列表中选择<select id="fm-rerank-model-select" class="text_pole" disabled><option value="">请先拉取模型列表</option></select></label>
+          <p id="fm-rerank-model-status" class="fm-hint" role="status" aria-live="polite">完成重排地址和密钥输入后自动拉取，也可以手动刷新；无需先保存。</p>
+          <label>Rerank 模型（也可手动填写）<input class="text_pole fm-code" name="rerankModel" placeholder="选择支持重排的模型，或手动填写" spellcheck="false"></label>
+          <p class="fm-hint">从 /rerank 地址推导同级 /models。服务不提供模型列表时可手动填写，列表中请自行选择重排模型。</p>
+          <label class="checkbox_label"><input type="checkbox" name="rerankRememberKey">将重排密钥明文保存到 扩展设置</label>
+          <p class="fm-hint">默认仅在当前页面／应用会话中保存。重排使用独立密钥；查询文本和入选的候选总结会发送给该服务。</p>
+          <div class="fm-grid fm-grid-two">
+            <label>向量候选池大小<input class="text_pole" type="number" name="rerankCandidates" min="1" max="1000" required></label>
+            <label>重排超时（秒）<input class="text_pole" type="number" name="rerankTimeoutSeconds" min="1" max="180" required></label>
+          </div>
+          <p class="fm-hint">先按向量相似度筛选候选，再按重排相关度取剩余名额。候选池至少覆盖剩余名额，低于向量相似度下限的楼层仍不参与。</p>
+          <button class="menu_button" type="button" id="fm-test-rerank">测试已保存的重排接口</button>
+        </details>
+        <details id="fm-ai-panel">
+          <summary>⑤ AI 一键设置关键词</summary>
+          <p class="fm-hint">调用独立的聊天模型，从本聊天的已有总结提取人名、地名等关键词。默认每批 8 楼；处理全部总结，不受 N/M/K 限制。</p>
+          <label>AI 关键词 API 地址<input class="text_pole fm-code" type="url" name="aiKeywordEndpoint" placeholder="https://your-provider.example/v1" spellcheck="false"></label>
+          <p class="fm-hint">使用兼容 OpenAI 的 Chat Completions 接口，支持根地址或完整 /chat/completions 地址；服务需允许页面跨域访问。</p>
+          <label>AI 关键词 API Key<input class="text_pole fm-code" type="password" name="aiKeywordApiKey" autocomplete="off" placeholder="本地免密服务可留空"></label>
+          <div class="fm-actions"><button class="menu_button" type="button" id="fm-ai-load-models">拉取／刷新模型列表</button></div>
+          <label>从接口模型列表中选择<select id="fm-ai-model-select" class="text_pole" disabled><option value="">请先拉取模型列表</option></select></label>
+          <p id="fm-ai-model-status" class="fm-hint" role="status" aria-live="polite">完成地址和密钥输入后自动拉取；请选择能遵循指令并输出 JSON 的聊天模型。</p>
+          <label>关键词提取模型（也可手动填写）<input class="text_pole fm-code" name="aiKeywordModel" placeholder="例如 Qwen2-7B-Instruct，具体名称以服务商为准" spellcheck="false"></label>
+          <label class="checkbox_label"><input type="checkbox" name="aiKeywordRememberKey">将 AI 关键词密钥明文保存到 扩展设置</label>
+          <p class="fm-hint">默认仅在当前页面／应用会话保存密钥。每次只发送本批总结和预设内容，完整聊天与其他两套接口密钥不会发送到此接口。</p>
+          <label class="checkbox_label"><input type="checkbox" name="aiKeywordAuto">启用楼层记忆时，每次模型回复完成后自动提取该楼关键词</label>
+          <p class="fm-hint">先提取总结，再处理新回复；没有总结则跳过。当前非空关键词会保留，空关键词可补全。自动提取默认关闭，同一总结的自动空结果不会因重复事件反复请求。</p>
+          <div class="fm-grid">
+            <label>每批楼数<input class="text_pole" type="number" name="aiKeywordBatchSize" min="1" max="100" required></label>
+            <label>每楼关键词上限<input class="text_pole" type="number" name="aiKeywordLimit" min="1" max="30" required></label>
+            <label>超时（秒）<input class="text_pole" type="number" name="aiKeywordTimeoutSeconds" min="1" max="300" required></label>
+          </div>
+          <div class="fm-grid">
+            <label>温度 temperature<input class="text_pole" type="number" name="aiKeywordTemperature" min="0" max="2" step="0.01" required></label>
+            <label>top_p<input class="text_pole" type="number" name="aiKeywordTopP" min="0.01" max="1" step="0.01" required></label>
+            <label>最大输出 token<input class="text_pole" type="number" name="aiKeywordMaxTokens" min="128" max="32768" required></label>
+          </div>
+          <label>AI 关键词思考模式<select class="text_pole" name="aiKeywordThinking">
+            <option value="auto">自动：硅基流动 Qwen3-8B 关闭思考</option>
+            <option value="off">关闭思考：发送 enable_thinking=false</option>
+            <option value="service">仅使用服务默认与附加请求参数</option>
+          </select></label>
+          <p class="fm-hint">自动模式识别硅基流动官方 API 地址和 Qwen3-8B，附加参数中明确指定的开关优先。硅基流动使用顶层 enable_thinking，不使用 chat_template_kwargs；其他服务按其支持的参数设置。</p>
+          <label class="checkbox_label"><input type="checkbox" name="aiKeywordJsonMode">发送 JSON 输出模式参数（仅接口支持时启用）</label>
+          <details>
+            <summary>关键词提示词预设</summary>
+            <p class="fm-hint">消息按排列顺序发送，可修改 role、内容并增删或排序。{{summaries}} 放入本批楼号和总结，{{max_keywords}} 为关键词上限，{{char}} / {{user}} 为当前角色名与用户名。</p>
+            <p class="fm-hint">预设必须包含 {{summaries}}，并要求返回 {"items":[{"floor":1,"keywords":["人名","地名"]}]}。floor 使用输入中的楼号；没有合适词时返回空数组。</p>
+            <div id="fm-ai-prompts"></div>
+            <div class="fm-actions">
+              <button class="menu_button" type="button" id="fm-ai-add-prompt">＋ 添加预设消息</button>
+              <button class="menu_button" type="button" id="fm-ai-reset-prompts">恢复内置提示词</button>
+            </div>
+            <label>附加请求参数（JSON，可选）<textarea class="text_pole fm-code" name="aiKeywordExtraBody" rows="3" spellcheck="false"></textarea></label>
+            <p class="fm-hint">硅基流动关闭思考可填 {"enable_thinking":false}；vLLM 等服务按其文档配置 chat_template_kwargs。可填写服务支持的 top_k 等参数。温度、top_p 等已有选项请在上方设置；不支持附加参数的服务保持 {}。</p>
+          </details>
+          <details id="fm-ai-cleanup-panel">
+            <summary>AI 返回关键词的清洗</summary>
+            <label class="checkbox_label"><input type="checkbox" name="aiKeywordExcludeUser">排除 {{user}} 占位符和当前用户名（整词匹配）</label>
+            <p class="fm-hint">默认开启，同时在提示词中要求排除用户本人，已有自定义预设也会附加此要求。AI 返回后逐个清洗关键词、去空去重，再限制数量；不会修改手动输入的词。</p>
+            <div id="fm-ai-keyword-rules"></div>
+            <button class="menu_button" type="button" id="fm-ai-add-cleanup">＋ 添加关键词清洗正则</button>
+            <p class="fm-hint">正则作用于单个关键词，按顺序执行；替换后为空则删除该词。例：匹配 ^(?:我|你|用户|玩家|主角)$，替换留空。这里的规则独立于聊天清洗与总结提取规则。</p>
+          </details>
+          <label>一键设置的写入方式<select id="fm-ai-write-mode" class="text_pole">
+            <option value="missing">只补空关键词，保留当前非空关键词</option>
+            <option value="replace">重新生成全部，覆盖现有关键词</option>
+          </select></label>
+          <div class="fm-actions">
+            <button class="menu_button" type="button" id="fm-ai-test">测试已保存的关键词接口</button>
+            <button class="menu_button" type="button" id="fm-ai-generate">AI 一键设置本聊天关键词</button>
+          </div>
+          <p id="fm-ai-diagnostics" class="fm-hint fm-diagnostics" role="status" aria-live="polite"></p>
+          <p class="fm-hint">先保存设置再运行。手动清空过、或之前 AI 返回空词的楼层，也会在一键补空时处理。每批完成后保存，可用下方“取消当前操作”停止；已完成的楼层会保留。之后仍可直接修改每楼关键词。</p>
+        </details>
+        <button class="menu_button fm-primary" type="submit">保存设置</button>
+      </form>
+      <p id="fm-status" class="fm-status" role="status" aria-live="polite">准备就绪</p>
+      <div class="fm-actions">
+        <button class="menu_button" type="button" id="fm-rescan">提取／刷新本聊天总结</button>
+        <button class="menu_button" type="button" id="fm-preview">预览本次注入</button>
+        <button class="menu_button" type="button" id="fm-export">导出总结 JSON</button>
+        <button class="menu_button" type="button" id="fm-cancel">取消当前操作</button>
+      </div>
+      <p class="fm-hint">预览展示区域楼号、召回来源、评分和查询文本，不展示最终组装的聊天内容。使用已保存设置；启用向量或重排时可能请求接口。与其他会删除或压缩聊天消息的扩展同时使用时，请检查最终发送的提示词。</p>
+      <details id="fm-preview-panel"><summary>注入预览与最近一次召回</summary><pre id="fm-preview-output" class="fm-output"></pre></details>
+      <details id="fm-records-panel">
+        <summary>逐楼总结与关键词 <span id="fm-record-count"></span></summary>
+        <input id="fm-record-search" class="text_pole" placeholder="搜索楼号、总结或关键词" aria-label="搜索总结">
+        <div id="fm-records"></div>
+        <div class="fm-actions"><button class="menu_button" type="button" id="fm-prev-page">上一页</button><span id="fm-page"></span><button class="menu_button" type="button" id="fm-next-page">下一页</button></div>
+      </details>
+    </div>
+  </div>
+</div>

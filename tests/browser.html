@@ -1,0 +1,773 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Floor Memory Browser Integration</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    body { margin:0; padding:24px; color:#e5e5e8; background:#1c2027; font:15px/1.5 system-ui,sans-serif; }
+    main { max-width:620px; margin:auto; }
+    .text_pole, select { padding:8px; color:inherit; background:#262d37; border:1px solid #47505e; border-radius:5px; font:inherit; }
+    .checkbox_label { display:flex; }
+    .menu_button { color:inherit; background:#2b3542; border:1px solid #536073; border-radius:5px; }
+    .inline-drawer-header { font-size:20px; padding:12px 0; }
+    #browser-test-result { color:#9bddb4; white-space:pre-wrap; }
+  </style>
+</head>
+<body><main><h1 style="font-size:15px;opacity:.6">SillyTavern extension test host</h1><div id="extensions_settings2"></div><pre id="browser-test-result"></pre></main>
+<script type="module">
+import { DEFAULT_SETTINGS, MODULE_KEY, isVisible } from '/core.js';
+import { VectorCache } from '/embeddings.js';
+const tauri = new URLSearchParams(location.search).has('tauri');
+const checks = [];
+const failures = [];
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const assert = (condition, message) => { if (!condition) throw new Error(message); };
+const check = async (name, action) => {
+    try { await action(); checks.push(name); }
+    catch (error) { failures.push(name + ': ' + error.stack); throw error; }
+};
+async function waitFor(predicate, label, timeout = 7000) {
+    const start = Date.now();
+    while (Date.now() - start < timeout) { if (await predicate()) return; await delay(30); }
+    throw new Error('Timeout: ' + label);
+}
+const listeners = new Map();
+const eventNames = ['CHAT_CHANGED','CHAT_LOADED','MESSAGE_RECEIVED','MESSAGE_SENT','MESSAGE_UPDATED','MESSAGE_EDITED','MESSAGE_DELETED','MESSAGE_SWIPED','MESSAGE_SWIPE_DELETED','GENERATION_STARTED','GENERATION_ENDED','GENERATION_STOPPED','CHARACTER_MESSAGE_RENDERED'];
+const eventSource = { on: (name, callback) => {
+    if (!listeners.has(name)) listeners.set(name, []);
+    listeners.get(name).push(callback);
+} };
+const emit = (name, ...args) => (listeners.get(name) ?? []).forEach(callback => callback(...args));
+const texts = ['海港船坞完成修船', '星钥藏在古塔密室', '雪山冰洞封印巨兽', '森林旅店结识商人', '沙漠商队借来骆驼', '城堡守卫接受委托', '花园钟楼等待日出', '河谷木桥抵达营地'];
+function makeChat() {
+    return texts.flatMap((summary, index) => [
+        { name:'旅行者', is_user:true, mes:'用户提问' + (index + 1), send_date:100 + index * 2, extra:{} },
+        { name:'向导', is_user:false, mes:'<thinking>隐藏推理</thinking><content>回复' + (index + 1) + '</content><summary>' + summary + '</summary>', send_date:101 + index * 2, extra:{ custom:'unchanged' } },
+    ]).concat([{ name:'旅行者', is_user:true, mes:'星钥在哪里？', send_date:200, extra:{} }]);
+}
+let saves = 0;
+let ctx = {
+    chat: makeChat(), chatId:'browser-chat', characterId:0, characters:[{ avatar:'guide.png' }],
+    name1:'旅行者', name2:'向导', chatMetadata:{}, mainApi:'openai', chatCompletionSettings:{ function_calling:true, strip_old_tool_calls:false },
+    extensionSettings:{ [MODULE_KEY]:{ ...structuredClone(DEFAULT_SETTINGS), recentCount:2, middleCount:2, recallCount:2, queryFloors:0, keywordDictionary:'星钥', endpoint:location.origin + '/mock/v1', model:'test-embedding' } },
+    eventSource, eventTypes:Object.fromEntries(eventNames.map(name => [name,name])),
+    saveMetadata:async () => { saves++; },
+    saveSettingsDebounced:() => {},
+};
+globalThis.SillyTavern = { getContext:() => ctx };
+const workerUrls = [];
+if (tauri) {
+    globalThis.__TAURI_RUNNING__ = true;
+    const NativeWorker = globalThis.Worker;
+    globalThis.Worker = class extends NativeWorker {
+        constructor(url, options) {
+            if (options?.type === 'module') throw new Error('Test host blocks module workers');
+            workerUrls.push(String(url));
+            super(url, options);
+        }
+    };
+    setTimeout(() => {
+        globalThis.__TAURITAVERN__ = { ready: new Promise(resolve => setTimeout(resolve, 100)) };
+    }, 100);
+}
+const notices = [];
+globalThis.toastr = Object.fromEntries(['error','warning','info','success'].map(type => [type, message => notices.push({ type,message })]));
+globalThis.__testContext = () => ctx;
+function promptFor(chat = ctx.chat) { return chat.filter(isVisible).map((message,index) => ({ ...structuredClone(message), index })); }
+async function generate(type = 'normal', prompt = promptFor()) {
+    let aborted = false;
+    await globalThis.floorMemoryInterceptor(prompt, 32000, () => { aborted = true; }, type);
+    assert(!aborted, 'generation unexpectedly aborted: ' + document.querySelector('#fm-status').textContent);
+    return prompt;
+}
+const state = () => fetch('/__state').then(response => response.json());
+
+try {
+    await import(tauri ? '/scripts/extensions/third-party/floor-memory/index.js' : '/index.js');
+    if (tauri) await check('等待 Tauri 宿主 ready 后再挂载扩展设置', async () => {
+        await delay(50);
+        assert(!document.querySelector('#fm-form'), 'mounted before host ready');
+    });
+    await waitFor(() => document.querySelector('#fm-form'), 'settings mount');
+    await delay(450);
+    await check('只填未保存的 URL 和密钥即可自动拉取、下拉选择模型', async () => {
+        const form = document.querySelector('#fm-form');
+        form.elements.model.value = '';
+        form.elements.endpoint.value = location.origin + '/mock/v1/embeddings';
+        form.elements.apiKey.value = 'browser-test-only-key';
+        form.elements.endpoint.dispatchEvent(new Event('input'));
+        form.elements.apiKey.dispatchEvent(new Event('input'));
+        form.elements.apiKey.dispatchEvent(new Event('change'));
+        document.querySelector('#fm-embedding-panel').open = true;
+        const select = document.querySelector('#fm-model-select');
+        await waitFor(() => select.options.length === 4 && !select.disabled, 'automatic model load');
+        const { modelCalls } = await state();
+        assert(modelCalls.at(-1).path === '/mock/v1/models', 'models URL derived incorrectly');
+        assert(modelCalls.at(-1).method === 'GET', 'models request not GET');
+        assert(modelCalls.at(-1).authorization === 'Bearer browser-test-only-key', 'unsaved API key not used');
+        assert(form.elements.model.value === '', 'automatic listing overwrote model input');
+        assert([...select.options].some(option => option.value === 'private-opaque-id'), 'unknown model id filtered out');
+        select.value = 'test-embedding-v2';
+        select.dispatchEvent(new Event('change'));
+        assert(form.elements.model.value === 'test-embedding-v2', 'dropdown selection not applied');
+        assert(ctx.extensionSettings[MODULE_KEY].model === 'test-embedding', 'model persisted before save');
+    });
+    await check('修改连接取消旧模型列表请求，迟到响应不能覆盖新列表', async () => {
+        const form = document.querySelector('#fm-form');
+        form.elements.endpoint.value = location.origin + '/slow-models/v1';
+        form.elements.endpoint.dispatchEvent(new Event('input'));
+        document.querySelector('#fm-load-models').click();
+        await waitFor(async () => (await state()).modelCalls.some(call => call.path.startsWith('/slow-models/')), 'slow model load began');
+        form.elements.endpoint.value = location.origin + '/mock/v1';
+        form.elements.endpoint.dispatchEvent(new Event('input'));
+        form.elements.endpoint.dispatchEvent(new Event('change'));
+        const select = document.querySelector('#fm-model-select');
+        await waitFor(() => [...select.options].some(option => option.value === 'private-opaque-id'), 'new models loaded');
+        await delay(1800);
+        assert(![...select.options].some(option => option.value === 'stale-model'), 'stale models replaced new models');
+        assert(form.elements.model.value === 'test-embedding-v2', 'manual model changed during connection update');
+    });
+    await check('模型列表失败或为空时提示原因并保留手动模型入口', async () => {
+        const form = document.querySelector('#fm-form');
+        form.elements.endpoint.value = location.origin + '/failing-models/v1';
+        form.elements.endpoint.dispatchEvent(new Event('input'));
+        document.querySelector('#fm-load-models').click();
+        await waitFor(() => document.querySelector('#fm-model-status').textContent.includes('HTTP 401'), 'model auth error');
+        assert(document.querySelector('#fm-model-select').disabled, 'stale options remained selectable');
+        assert(form.elements.model.value === 'test-embedding-v2', 'failed fetch erased manual input');
+        form.elements.endpoint.value = location.origin + '/empty-models/v1';
+        form.elements.endpoint.dispatchEvent(new Event('input'));
+        document.querySelector('#fm-load-models').click();
+        await waitFor(() => document.querySelector('#fm-model-status').textContent.includes('列表为空'), 'empty model list');
+        form.elements.model.value = 'test-embedding';
+        form.elements.model.dispatchEvent(new Event('input'));
+        form.elements.endpoint.value = location.origin + '/mock/v1';
+        form.elements.endpoint.dispatchEvent(new Event('input'));
+        document.querySelector('#fm-load-models').click();
+        await waitFor(() => document.querySelector('#fm-model-select').value === 'test-embedding', 'selected model restored');
+    });
+    await check('重排模型列表使用独立未保存连接，支持选择、取消旧请求和手动回退', async () => {
+        const form = document.querySelector('#fm-form');
+        const embeddingSelection = document.querySelector('#fm-model-select').value;
+        form.elements.rerankEndpoint.value = location.origin + '/slow-models/v2/rerank';
+        form.elements.rerankApiKey.value = 'unsaved-rerank-key';
+        form.elements.rerankEndpoint.dispatchEvent(new Event('input'));
+        document.querySelector('#fm-rerank-load-models').click();
+        await waitFor(async () => (await state()).modelCalls.some(call => call.path === '/slow-models/v2/models'), 'slow rerank model load');
+        form.elements.rerankEndpoint.value = location.origin + '/rerank-models/v1/rerank';
+        form.elements.rerankEndpoint.dispatchEvent(new Event('input'));
+        form.elements.rerankEndpoint.dispatchEvent(new Event('change'));
+        const select = document.querySelector('#fm-rerank-model-select');
+        await waitFor(() => [...select.options].some(option => option.value === 'test-reranker'), 'rerank model list');
+        select.value = 'test-reranker'; select.dispatchEvent(new Event('change'));
+        const request = (await state()).modelCalls.at(-1);
+        assert(request.path === '/rerank-models/v1/models' && request.authorization === 'Bearer unsaved-rerank-key', 'rerank connection was not independent');
+        assert(form.elements.rerankModel.value === 'test-reranker', 'rerank model selection not applied');
+        await delay(1400);
+        assert(![...select.options].some(option => option.value === 'stale-model'), 'stale rerank list replaced new one');
+        assert(document.querySelector('#fm-model-select').value === embeddingSelection, 'rerank picker changed embedding picker');
+        form.elements.rerankEndpoint.value = location.origin + '/failing-models/v1/rerank';
+        form.elements.rerankEndpoint.dispatchEvent(new Event('input'));
+        document.querySelector('#fm-rerank-load-models').click();
+        await waitFor(() => document.querySelector('#fm-rerank-model-status').textContent.includes('401'), 'rerank models failure');
+        assert(form.elements.rerankModel.value === 'test-reranker', 'failed rerank listing erased manual model');
+    });
+    await check('设置面板加载；保存设置时密钥默认只进入 sessionStorage', async () => {
+        const form = document.querySelector('#fm-form');
+        form.elements.enabled.checked = true;
+        form.elements.apiKey.value = 'browser-test-only-key';
+        form.elements.rerankApiKey.value = 'browser-rerank-only-key';
+        form.elements.rerankEndpoint.value = location.origin + '/mock/v1/rerank';
+        form.elements.rerankModel.value = 'test-reranker';
+        form.dispatchEvent(new Event('submit', { cancelable:true, bubbles:true }));
+        await waitFor(() => ctx.chatMetadata[MODULE_KEY]?.records.length === 8, 'auto extraction');
+        await waitFor(() => document.querySelector('#fm-status').textContent.includes('已同步'), 'sync settled');
+        assert(ctx.extensionSettings[MODULE_KEY].apiKey === '', 'API key persisted without permission');
+        assert(sessionStorage.getItem(MODULE_KEY + '.sessionKey') === 'browser-test-only-key', 'session key missing');
+        assert(saves > 0, 'metadata not saved');
+        assert(ctx.extensionSettings[MODULE_KEY].rerankApiKey === '', 'rerank key persisted without permission');
+        assert(sessionStorage.getItem(MODULE_KEY + '.rerankSessionKey') === 'browser-rerank-only-key', 'rerank session key missing');
+    });
+    await check('未设置关键词不会因总结命中或旧词表而进入关键词召回', async () => {
+        assert(!document.querySelector('[name="keywordDictionary"]'), 'supplement dictionary still visible');
+        assert(!('keywordDictionary' in ctx.extensionSettings[MODULE_KEY]), 'obsolete dictionary not migrated');
+        ctx.extensionSettings[MODULE_KEY].vectorEnabled = false;
+        const output = await generate();
+        assert(!output.some(message => message.mes.startsWith('[历史召回')), 'empty keywords triggered summary text matching');
+        assert((await state()).calls.length === 0, 'vector-disabled generation made embedding calls');
+        ctx.extensionSettings[MODULE_KEY].vectorEnabled = true;
+    });
+    await check('楼号、总结、关键词搜索原样保留；搜索不自动生成触发词', async () => {
+        const search = document.querySelector('#fm-record-search');
+        const filter = value => { search.value = value; search.dispatchEvent(new Event('input')); };
+        filter('星钥');
+        assert(document.querySelectorAll('.fm-record').length === 1, 'summary text search changed');
+        let card = document.querySelector('.fm-record');
+        assert(card.querySelector('strong').textContent.includes('第 2 楼'), 'summary search result wrong');
+        assert(card.querySelector('[data-field="keywords"]').value === '', 'search created implicit keywords');
+        assert(card.textContent.includes('留空不参与关键词匹配'), 'empty keyword label still ambiguous');
+        card.querySelector('[data-field="keywords"]').value = '星钥,KeyAlias';
+        card.querySelector('[data-field="keywords"]').dispatchEvent(new Event('input'));
+        await waitFor(() => ctx.chatMetadata[MODULE_KEY].records[1].keywords?.includes('KeyAlias'), 'manual keywords saved');
+        filter('keyalias');
+        assert(document.querySelectorAll('.fm-record').length === 1, 'case-insensitive keyword search changed');
+        filter('钟楼');
+        assert(document.querySelector('.fm-record strong').textContent.includes('第 7 楼'), 'summary search without keywords broken');
+        filter('3');
+        assert(document.querySelector('.fm-record strong').textContent.includes('第 3 楼'), 'floor-number search broken');
+        filter('');
+        assert(document.querySelectorAll('.fm-record').length === 8, 'clearing search failed');
+    });
+    await check('关键词输入直接生效并保存原始逗号；输入期间保留焦点和总结草稿', async () => {
+        document.querySelector('#fm-records-panel').open = true;
+        const card = document.querySelectorAll('.fm-record')[5];
+        const input = card.querySelector('[data-field="keywords"]');
+        const summary = card.querySelector('[data-field="summary"]');
+        summary.value = '尚未保存的总结草稿';
+        const snapshots = [];
+        const saveMetadata = ctx.saveMetadata;
+        ctx.saveMetadata = async () => {
+            snapshots.push(structuredClone(ctx.chatMetadata));
+            await delay(120);
+        };
+        input.focus();
+        for (const text of ['15', '15,', '15, 12', '15, 12，12,']) {
+            input.value = text;
+            input.dispatchEvent(new Event('input'));
+            assert(ctx.chatMetadata[MODULE_KEY].records[5].keywordText === text, 'keyword edit not immediately applied');
+        }
+        assert(JSON.stringify(ctx.chatMetadata[MODULE_KEY].records[5].keywords) === '["15","12，12"]', 'comma split changed');
+        assert(document.activeElement === input && input.isConnected, 'input lost focus');
+        assert(summary.value === '尚未保存的总结草稿', 'keyword autosave discarded summary draft');
+        assert(ctx.chatMetadata[MODULE_KEY].records[5].override === undefined, 'keyword edit saved summary draft');
+        await waitFor(() => document.querySelector('#fm-status').textContent.includes('自动保存第 6 楼'), 'keyword persistence');
+        assert(snapshots.length <= 2, 'in-flight keyword writes were not coalesced');
+        assert(snapshots.at(-1)[MODULE_KEY].records[5].keywordText === '15, 12，12,', 'latest text not persisted');
+        ctx.saveMetadata = saveMetadata;
+        const search = document.querySelector('#fm-record-search');
+        search.focus();
+        search.dispatchEvent(new Event('input'));
+        assert(document.querySelectorAll('.fm-record')[5].querySelector('[data-field="keywords"]').value === '15, 12，12,', 'rerender rewrote punctuation');
+        assert(document.querySelectorAll('.fm-record-head small').length === 0, 'summary source badge still visible');
+    });
+    await check('真实浏览器 Worker 清洗与提取 UI；结果安全按文本显示', async () => {
+        document.querySelector('#fm-regex-input').value = '<thinking><summary>不要提取</summary></thinking><content>对白</content><summary><img src=x onerror=alert(1)>星钥</summary>';
+        document.querySelector('#fm-test-regex').click();
+        await waitFor(() => document.querySelector('#fm-regex-output').textContent.includes('提取的总结'), 'regex test');
+        const output = document.querySelector('#fm-regex-output');
+        assert(!output.textContent.includes('不要提取'), 'cleanup ordering wrong');
+        assert(output.textContent.includes('<img'), 'text not retained');
+        assert(output.querySelector('img') === null, 'untrusted HTML was rendered');
+    });
+    await check('三段注入、原消息不变、关键词优先并仅向量化未命中旧楼层', async () => {
+        const before = JSON.stringify(ctx.chat);
+        const prompt = promptFor();
+        prompt[12].mes = '宿主预先格式化的第七楼用户消息';
+        const preserved = prompt[12];
+        const originalUsers = [prompt[0], prompt[2], prompt[8], prompt[10]];
+        const output = await generate('normal', prompt);
+        assert(output.length === 13, 'wrong message count: ' + output.length);
+        assert(output[0] === originalUsers[0] && output[2] === originalUsers[1], 'recalled floors lost their user messages');
+        assert(output[1].mes.split('\n')[0] === '[历史召回 · 第 1 楼]', 'semantic recall header wrong');
+        assert(output[3].mes.split('\n')[0] === '[历史召回 · 第 2 楼]', 'keyword recall header wrong');
+        assert(output[4] === originalUsers[2] && output[6] === originalUsers[3], 'middle floors lost their user messages');
+        assert(output[5].mes.split('\n')[0] === '[近期召回 · 第 5 楼]', 'middle boundary or header wrong');
+        assert(output[7].mes.split('\n')[0] === '[近期召回 · 第 6 楼]', 'middle order or header wrong');
+        assert(output[8] === preserved, 'recent message not preserved exactly');
+        assert(output.at(-1).mes === '星钥在哪里？', 'pending user omitted');
+        assert(JSON.stringify(ctx.chat) === before, 'persistent chat was mutated');
+        const { calls } = await state();
+        assert(calls.length === 2, 'expected document batch plus query');
+        assert(calls[0].input.length === 3, 'matched floor vectorized');
+        assert(!calls[0].input.includes(texts[1]), 'keyword-selected floor vectorized');
+        assert(!calls[0].input.some(text => texts.slice(4).includes(text)), 'recent or middle floor vectorized');
+        assert(calls[0].authorization === 'Bearer browser-test-only-key', 'custom key not used');
+        const preview = document.querySelector('#fm-preview-output').textContent;
+        assert(preview.includes('最近原文 N：') && preview.includes('召回：2 楼'), 'preview ranges missing');
+        assert(preview.includes('查询文本:') && preview.trim().endsWith('星钥在哪里？'), 'query missing or unexpected text follows query');
+        assert(!preview.includes('发送顺序') && !preview.includes('[模型 ·') && !preview.includes('用户提问1'), 'preview still contains assembled history');
+    });
+    await check('IndexedDB 增量缓存避免重复向量化；关键词满 K 后零网络请求', async () => {
+        await generate();
+        const count = (await state()).calls.length;
+        assert(count === 3, 'document vectors not cached');
+        ctx.extensionSettings[MODULE_KEY].recallCount = 1;
+        await generate();
+        assert((await state()).calls.length === count, 'network used when keywords filled K');
+        ctx.extensionSettings[MODULE_KEY].recallCount = 2;
+    });
+    await check('手工总结独立保存；恢复正则总结后保留关键词与其召回能力', async () => {
+        document.querySelector('#fm-records-panel').open = true;
+        const card = document.querySelectorAll('.fm-record')[3];
+        card.querySelector('[data-field="summary"]').value = '手工记录：森林中的约定';
+        card.querySelector('[data-field="keywords"]').value = '星钥';
+        card.querySelector('[data-field="keywords"]').dispatchEvent(new Event('input'));
+        card.querySelector('button').click();
+        await waitFor(() => ctx.chatMetadata[MODULE_KEY].records[3].override, 'manual save');
+        ctx.extensionSettings[MODULE_KEY].recallCount = 1;
+        const output = await generate();
+        assert(output[0].mes === '用户提问4' && output[1].mes.includes('第 4 楼') && output[1].mes.includes('手工记录'), 'manual keyword or user message ignored');
+        document.querySelectorAll('.fm-record')[3].querySelectorAll('button')[1].click();
+        await waitFor(() => ctx.chatMetadata[MODULE_KEY].records[3].override === undefined, 'reset');
+        assert(ctx.chatMetadata[MODULE_KEY].records[3].extracted === texts[3], 'auto summary lost');
+        assert(ctx.chatMetadata[MODULE_KEY].records[3].keywords[0] === '星钥', 'reset erased keywords');
+        assert(ctx.chatMetadata[MODULE_KEY].records[3].keywordText === '星钥', 'reset erased raw keyword text');
+        const restored = await generate();
+        assert(restored.some(message => message.mes.startsWith('[历史召回 · 第 4 楼]') && message.mes.includes(texts[3])), 'reset keyword no longer recalled');
+        const input = document.querySelectorAll('.fm-record')[3].querySelector('[data-field="keywords"]');
+        input.value = '';
+        input.dispatchEvent(new Event('input'));
+        await waitFor(() => document.querySelector('#fm-status').textContent.includes('自动保存第 4 楼'), 'clear test keyword');
+    });
+    await check('查询最近两条用户消息时，中间模型正文可以触发关键词；一条时不会', async () => {
+        const originalChat = structuredClone(ctx.chat);
+        const config = ctx.extensionSettings[MODULE_KEY];
+        const previous = { queryFloors:config.queryFloors, vectorEnabled:config.vectorEnabled };
+        const input = document.querySelectorAll('.fm-record')[2].querySelector('[data-field="keywords"]');
+        input.value = '21';
+        input.dispatchEvent(new Event('input'));
+        ctx.chat.at(-2).mes = '<thinking>隐藏内容</thinking><content>这里有线索 21</content><summary>' + texts[7] + '</summary>';
+        ctx.chat.at(-1).mes = '继续追问';
+        config.queryFloors = 2;
+        config.vectorEnabled = false;
+        const output = await generate();
+        assert(output.some(message => message.mes.startsWith('[历史召回 · 第 3 楼]')), 'assistant keyword missing from D=2 query');
+        config.queryFloors = 1;
+        assert(!(await generate()).some(message => message.mes.startsWith('[历史召回')), 'D=1 included earlier assistant');
+        ctx.chat = originalChat;
+        Object.assign(config, previous);
+    });
+    await check('查询先执行清洗并移除总结，关键词与向量共用清洗后的正文', async () => {
+        const cfg = ctx.extensionSettings[MODULE_KEY];
+        const previous = { cleanupRules:cfg.cleanupRules, queryFloors:cfg.queryFloors, recallCount:cfg.recallCount, vectorEnabled:cfg.vectorEnabled };
+        const originalQuery = ctx.chat.at(-1).mes;
+        const oldKeywords = ctx.chatMetadata[MODULE_KEY].records[2].keywords;
+        cfg.queryFloors = 0; cfg.recallCount = 2; cfg.vectorEnabled = true;
+        cfg.cleanupRules = [...cfg.cleanupRules, { enabled:true, pattern:'<discard>[\\s\\S]*?</discard>', flags:'g', replacement:'' }];
+        ctx.chat.at(-1).mes = '<thinking>思考假词</thinking><discard>清洗假词</discard><content>星钥在哪里？</content><summary>总结伪词</summary>';
+        ctx.chatMetadata[MODULE_KEY].records[2].keywords = ['思考假词', '清洗假词', '总结伪词'];
+        const output = await generate();
+        assert(!output.some(message => message.mes.startsWith('[历史召回 · 第 3 楼]')), 'discarded text triggered keyword recall');
+        const request = (await state()).calls.at(-1);
+        assert(JSON.stringify(request.input) === JSON.stringify(['<content>星钥在哪里？</content>']), 'embedding received unclean query');
+        const preview = document.querySelector('#fm-preview-output').textContent;
+        assert(preview.trim().endsWith('查询文本:\n<content>星钥在哪里？</content>'), 'preview does not show actual clean query');
+        ctx.chat.at(-1).mes = originalQuery;
+        ctx.chatMetadata[MODULE_KEY].records[2].keywords = oldKeywords;
+        Object.assign(cfg, previous);
+    });
+    await check('独立重排接口测试、向量候选重排及关键词满额时跳过全部请求', async () => {
+        document.querySelector('#fm-test-rerank').click();
+        await waitFor(() => document.querySelector('#fm-status').textContent.includes('Rerank 接口连接成功'), 'rerank connection test');
+        const config = ctx.extensionSettings[MODULE_KEY];
+        const previous = { recallCount:config.recallCount, similarityThreshold:config.similarityThreshold };
+        config.rerankEnabled = true;
+        config.rerankCandidates = 3;
+        config.recallCount = 2;
+        config.similarityThreshold = -1;
+        const before = (await state()).rerankCalls.length;
+        const output = await generate();
+        const request = (await state()).rerankCalls.at(-1);
+        assert((await state()).rerankCalls.length === before + 1, 'rerank not requested');
+        assert(request.authorization === 'Bearer browser-rerank-only-key', 'rerank used wrong key');
+        assert(request.model === 'test-reranker' && request.top_n === 1, 'rerank quota/model incorrect');
+        assert(request.documents.length === 3 && !request.documents.includes(texts[1]), 'keyword result entered rerank pool');
+        assert(output.some(message => message.mes.startsWith('[历史召回 · 第 3 楼]')), 'rerank selection did not override cosine order');
+        assert(!output.some(message => message.mes.startsWith('[历史召回 · 第 1 楼]')), 'cosine first result incorrectly retained');
+        assert(document.querySelector('#fm-preview-output').textContent.includes('重排相关度'), 'rerank score missing from compact preview');
+        const counts = await state();
+        config.recallCount = 1;
+        await generate();
+        const after = await state();
+        assert(after.calls.length === counts.calls.length && after.rerankCalls.length === counts.rerankCalls.length, 'full keyword quota requested vector/rerank');
+        Object.assign(config, previous, { rerankEnabled:false });
+    });
+    await check('重排失败时继续使用向量结果并保留关键词结果', async () => {
+        const config = ctx.extensionSettings[MODULE_KEY];
+        const previous = { recallCount:config.recallCount, similarityThreshold:config.similarityThreshold, rerankEndpoint:config.rerankEndpoint };
+        Object.assign(config, { rerankEnabled:true, recallCount:2, similarityThreshold:-1, rerankEndpoint:location.origin + '/failing-rerank/v1' });
+        const output = await generate();
+        assert(output.some(message => message.mes.startsWith('[历史召回 · 第 1 楼]')), 'vector fallback missing');
+        assert(output.some(message => message.mes.startsWith('[历史召回 · 第 2 楼]')), 'keyword result lost on rerank failure');
+        assert(document.querySelector('#fm-status').textContent.includes('重排不可用'), 'rerank fallback warning missing');
+        Object.assign(config, previous, { rerankEnabled:false });
+    });
+    await check('停止生成会取消重排请求，不提交部分结果', async () => {
+        const config = ctx.extensionSettings[MODULE_KEY];
+        const previous = { recallCount:config.recallCount, similarityThreshold:config.similarityThreshold, rerankEndpoint:config.rerankEndpoint };
+        Object.assign(config, { rerankEnabled:true, recallCount:2, similarityThreshold:-1, rerankEndpoint:location.origin + '/slow-rerank/v1' });
+        const before = (await state()).rerankCalls.length;
+        const prompt = promptFor();
+        const copy = JSON.stringify(prompt);
+        let aborted = false;
+        const pending = globalThis.floorMemoryInterceptor(prompt, 32000, () => { aborted = true; }, 'normal');
+        await waitFor(async () => (await state()).rerankCalls.length > before, 'rerank request started');
+        emit('GENERATION_STOPPED');
+        await pending;
+        assert(aborted && JSON.stringify(prompt) === copy, 'cancelled rerank committed results');
+        Object.assign(config, previous, { rerankEnabled:false });
+        await delay(450);
+    });
+    await check('切换 swipe 的生成视图排除目标回复，保留该轮用户消息', async () => {
+        const original = ctx.chat;
+        ctx.chat = ctx.chat.slice(0, -1);
+        const prompt = promptFor(ctx.chat.slice(0, -1));
+        const output = await generate('swipe', prompt);
+        assert(output.at(-1).mes === '用户提问8', 'swipe user not pending');
+        assert(!output.some(message => message.mes.includes('回复8')), 'swipe target leaked');
+        ctx.chat = original;
+    });
+    await check('编辑与删除事件同步新总结，旧内容不再参与召回', async () => {
+        const previousId = ctx.chatMetadata[MODULE_KEY].records[0].id;
+        ctx.chat[1].mes = '<summary>深海港口遇到信使</summary>';
+        emit('MESSAGE_EDITED');
+        await waitFor(() => ctx.chatMetadata[MODULE_KEY].records[0].extracted === '深海港口遇到信使', 'edited summary sync');
+        assert(ctx.chatMetadata[MODULE_KEY].records[0].id !== previousId, 'edited content reused stale identity');
+        const lastId = ctx.chatMetadata[MODULE_KEY].records[7].id;
+        ctx.chat.splice(0,2);
+        emit('MESSAGE_DELETED');
+        await waitFor(() => ctx.chatMetadata[MODULE_KEY].records.length === 7, 'delete summary sync');
+        assert(ctx.chatMetadata[MODULE_KEY].records[6].id === lastId, 'unaffected floor identity changed');
+        assert(ctx.chatMetadata[MODULE_KEY].records[6].floor === 7, 'floor number not updated');
+    });
+    await check('Embedding 失败保留关键词结果并显示降级原因', async () => {
+        ctx.extensionSettings[MODULE_KEY].recallCount = 2;
+        ctx.extensionSettings[MODULE_KEY].endpoint = location.origin + '/failing/v1';
+        const output = await generate();
+        assert(output.filter(message => message.mes.startsWith('[历史召回')).length === 1, 'keyword fallback missing');
+        assert(document.querySelector('#fm-status').textContent.includes('HTTP 401'), 'fallback reason missing');
+    });
+    await check('保存设置后的后台同步不会中断前台注入预览', async () => {
+        const form = document.querySelector('#fm-form');
+        form.elements.endpoint.value = location.origin + '/slow/v1';
+        form.dispatchEvent(new Event('submit', { cancelable:true, bubbles:true }));
+        document.querySelector('#fm-preview-output').textContent = '';
+        document.querySelector('#fm-preview').click();
+        await waitFor(() => document.querySelector('#fm-preview-output').textContent.includes('召回：'), 'slow foreground preview', 12000);
+        assert(!document.querySelector('#fm-status').textContent.includes('取消'), 'background sync canceled foreground job');
+        await delay(450);
+    });
+    await check('停止生成事件会取消正在进行的 Embedding 请求', async () => {
+        const before = (await state()).calls.length;
+        const prompt = promptFor();
+        const copy = JSON.stringify(prompt);
+        let aborted = false;
+        const promise = globalThis.floorMemoryInterceptor(prompt, 32000, () => { aborted = true; }, 'normal');
+        await waitFor(async () => (await state()).calls.length > before, 'stop test request began');
+        emit('GENERATION_STOPPED');
+        await promise;
+        assert(aborted && JSON.stringify(prompt) === copy, 'stop did not cancel without committing');
+        await delay(450);
+    });
+    await check('向量检索途中切换聊天会取消请求，不把旧结果写进新聊天', async () => {
+        ctx.extensionSettings[MODULE_KEY].endpoint = location.origin + '/slow/v1';
+        const previousCalls = (await state()).calls.length;
+        const originalPrompt = promptFor();
+        const copy = JSON.stringify(originalPrompt);
+        let aborted = false;
+        const promise = globalThis.floorMemoryInterceptor(originalPrompt, 32000, () => { aborted = true; }, 'normal');
+        await waitFor(async () => (await state()).calls.slice(previousCalls).some(call => call.path.startsWith('/slow/')), 'slow request began');
+        ctx = { ...ctx, chatId:'second-chat', chat:[{ name:'向导', is_user:false, mes:'<summary>新聊天</summary>' }], chatMetadata:{} };
+        ctx.extensionSettings[MODULE_KEY].enabled = false;
+        emit('CHAT_CHANGED');
+        await promise;
+        assert(aborted, 'old generation not aborted');
+        assert(JSON.stringify(originalPrompt) === copy, 'partial prompt committed');
+        assert(!ctx.chatMetadata[MODULE_KEY], 'old summaries leaked into new chat');
+    });
+    await check('真实 IndexedDB 持久化、重开数据库与跨聊天隔离', async () => {
+        const name = 'floor-memory-browser-isolation';
+        const first = new VectorCache({ databaseName:name });
+        await first.put([{ key:'one:a',scope:'one',vector:[1,0] },{ key:'two:b',scope:'two',vector:[0,1] }]);
+        const second = new VectorCache({ databaseName:name });
+        assert(JSON.stringify(await second.read(['one:a'])) === '[[1,0]]', 'not persistent');
+        await second.prune('one');
+        const values = await first.read(['one:a','two:b']);
+        assert(values[0] === undefined && values[1][1] === 1, 'cross-chat deletion');
+    });
+    await check('AI 接口模型拉取、角色预设排序与独立密钥保存', async () => {
+        ctx = { ...ctx, chatId:'ai-keyword-chat', chat:makeChat(), chatMetadata:{} };
+        ctx.chat.forEach((message, index) => {
+            if (!message.is_user) message.mes = '<summary>人物' + ((index + 1) / 2) + '在地点' + ((index + 1) / 2) + '发现标记 12，12。</summary>';
+        });
+        emit('CHAT_CHANGED');
+        const form = document.querySelector('#fm-form');
+        form.elements.enabled.checked = true;
+        form.elements.vectorEnabled.checked = false;
+        form.elements.rerankEnabled.checked = false;
+        form.elements.aiKeywordEndpoint.value = location.origin + '/keyword/v1/chat/completions';
+        form.elements.aiKeywordApiKey.value = 'keyword-test-only-key';
+        form.elements.aiKeywordEndpoint.dispatchEvent(new Event('input'));
+        form.elements.aiKeywordApiKey.dispatchEvent(new Event('change'));
+        const select = document.querySelector('#fm-ai-model-select');
+        await waitFor(() => [...select.options].some(option => option.value === 'small-instruct'), 'keyword model list');
+        select.value = 'small-instruct'; select.dispatchEvent(new Event('change'));
+        const call = (await state()).modelCalls.at(-1);
+        assert(call.path === '/keyword/v1/models' && call.authorization === 'Bearer keyword-test-only-key', 'AI model list used wrong connection');
+        form.elements.aiKeywordBatchSize.value = '3';
+        form.elements.aiKeywordTemperature.value = '.4';
+        form.elements.aiKeywordTopP.value = '.8';
+        form.elements.aiKeywordMaxTokens.value = '1024';
+        form.elements.aiKeywordJsonMode.checked = true;
+        form.elements.aiKeywordThinking.value = 'off';
+        form.elements.aiKeywordExtraBody.value = '{}';
+        for (const pattern of ['^冗余前缀：', '^玩家$']) {
+            document.querySelector('#fm-ai-add-cleanup').click();
+            const rule = document.querySelector('#fm-ai-keyword-rules').lastElementChild;
+            rule.querySelector('[data-field="pattern"]').value = pattern;
+        }
+        document.querySelector('#fm-ai-add-prompt').click();
+        const row = document.querySelectorAll('.fm-ai-prompt')[2];
+        row.querySelector('[data-field="role"]').value = 'assistant';
+        row.querySelector('[data-field="content"]').value = '我会逐楼给出 JSON 关键词。';
+        row.querySelector('button').click();
+        form.dispatchEvent(new Event('submit', { cancelable:true, bubbles:true }));
+        await waitFor(() => ctx.chatMetadata[MODULE_KEY]?.records.length === 8, 'AI chat summaries');
+        await delay(450);
+        const cfg = ctx.extensionSettings[MODULE_KEY];
+        assert(cfg.aiKeywordModel === 'small-instruct' && cfg.aiKeywordApiKey === '', 'AI key persisted or model missing');
+        assert(sessionStorage.getItem(MODULE_KEY + '.aiKeywordSessionKey') === 'keyword-test-only-key', 'AI key not in session');
+        assert(cfg.aiKeywordPrompts.map(message => message.role).join(',') === 'system,assistant,user', 'preset role/order not saved');
+        assert(cfg.cleanupRules.length === 1 && cfg.cleanupRules[0].pattern.includes('thinking'), 'preset polluted regex rules');
+        assert(cfg.aiKeywordCleanupRules.length === 2 && cfg.aiKeywordExcludeUser, 'keyword cleanup not saved independently');
+    });
+    await check('AI 接口测试发送已保存预设和参数，测试关键词不写入聊天', async () => {
+        const before = JSON.stringify(ctx.chatMetadata);
+        document.querySelector('#fm-ai-test').click();
+        await waitFor(() => document.querySelector('#fm-status').textContent.includes('AI 关键词接口测试成功'), 'AI connection test');
+        assert(JSON.stringify(ctx.chatMetadata) === before, 'connection test altered actual records');
+        const call = (await state()).keywordCalls.at(-1);
+        assert(call.authorization === 'Bearer keyword-test-only-key' && call.model === 'small-instruct', 'AI key/model not independent');
+        assert(call.temperature === .4 && call.top_p === .8 && call.max_tokens === 1024, 'sampling settings ignored');
+        assert(call.response_format.type === 'json_object' && call.enable_thinking === false && call.chat_template_kwargs === undefined, 'SiliconFlow thinking/JSON settings ignored');
+        assert(call.messages.map(message => message.role).join(',') === 'system,assistant,user', 'preset roles not used');
+        assert(!JSON.stringify(call).includes('browser-test-only-key'), 'embedding key leaked to AI request');
+        assert(document.querySelector('#fm-status').textContent.includes('人物1,地点1,12，12'), 'AI keyword cleanup did not apply to connection test');
+        const diagnostics = document.querySelector('#fm-ai-diagnostics').textContent;
+        assert(diagnostics.includes('接口往返') && diagnostics.includes('本地解析清洗') && diagnostics.includes('思考 0'), 'timing/token statistics missing');
+    });
+    await check('AI 一键分批处理全聊天总结，保留手动关键词，结果可直接编辑和召回', async () => {
+        document.querySelector('#fm-record-search').value = '';
+        document.querySelector('#fm-record-search').dispatchEvent(new Event('input'));
+        document.querySelector('#fm-records-panel').open = true;
+        const manual = document.querySelector('.fm-record [data-field="keywords"]');
+        manual.value = '手动保留';
+        manual.dispatchEvent(new Event('input'));
+        await waitFor(() => document.querySelector('#fm-status').textContent.includes('自动保存第 1 楼'), 'manual keyword saved');
+        const before = (await state()).keywordCalls.length;
+        document.querySelector('#fm-ai-generate').click();
+        await waitFor(() => document.querySelector('#fm-status').textContent.includes('AI 关键词已保存：7 / 7'), 'all missing summaries processed');
+        const calls = (await state()).keywordCalls.slice(before);
+        assert(calls.length === 3, 'wrong number of AI batches');
+        assert(ctx.chatMetadata[MODULE_KEY].records[0].keywordText === '手动保留', 'manual keyword overwritten');
+        assert(ctx.chatMetadata[MODULE_KEY].records.slice(1).every(record => record.keywordSource === 'ai' && record.keywords.includes('12，12')), 'AI keywords not mapped to records');
+        assert(ctx.chatMetadata[MODULE_KEY].records[7].keywordText.includes('地点8'), 'recent floors were omitted from batch operation');
+        document.querySelector('#fm-ai-generate').click();
+        await waitFor(() => document.querySelector('#fm-status').textContent.includes('没有需要 AI'), 'repeat batch skipped');
+        assert((await state()).keywordCalls.length === before + 3, 'processed records requested again');
+        const originalQuery = ctx.chat.at(-1).mes;
+        ctx.chat.at(-1).mes = '地点2';
+        const output = await generate();
+        assert(output.some(message => message.mes.startsWith('[历史召回 · 第 2 楼]')), 'AI keyword not used by existing matcher');
+        ctx.chat.at(-1).mes = originalQuery;
+    });
+    await check('前 3 楼旧词清空后一键补空必须重填，非空后续楼层保持原样', async () => {
+        const old = structuredClone(ctx.chatMetadata[MODULE_KEY].records);
+        const inputs = [...document.querySelectorAll('.fm-record [data-field="keywords"]')].slice(0, 3);
+        for (const input of inputs) {
+            input.value = '';
+            input.dispatchEvent(new Event('input'));
+        }
+        await waitFor(() => document.querySelector('#fm-status').textContent.includes('自动保存第 3 楼'), 'first three keywords cleared');
+        assert(ctx.chatMetadata[MODULE_KEY].records.slice(0, 3).every(record => !record.keywords.length), 'clear was not persisted');
+        const before = (await state()).keywordCalls.length;
+        document.querySelector('#fm-ai-generate').click();
+        await waitFor(() => document.querySelector('#fm-status').textContent.includes('AI 关键词已保存：3 / 3'), 'first three refilled');
+        const next = ctx.chatMetadata[MODULE_KEY].records;
+        assert((await state()).keywordCalls.length === before + 1, 'empty floors were skipped or nonempty floors requested');
+        assert(next.slice(0, 3).every(record => record.keywordText === '人物' + record.floor + ',地点' + record.floor + ',12，12'), 'empty records not populated/cleaned');
+        assert(next.slice(3).every((record, i) => record.keywordText === old[i + 3].keywordText), 'nonempty records were changed');
+    });
+    await check('夹杂已有关键词时，首批 items 后续直接数组都按实际楼号写入', async () => {
+        const cfg = ctx.extensionSettings[MODULE_KEY];
+        const previousEndpoint = cfg.aiKeywordEndpoint;
+        cfg.aiKeywordEndpoint = location.origin + '/mixed-keywords/v1';
+        const beforeRecords = structuredClone(ctx.chatMetadata[MODULE_KEY].records);
+        const emptyFloors = [1, 2, 3, 5, 7, 8];
+        const inputs = [...document.querySelectorAll('.fm-record [data-field="keywords"]')];
+        for (const floor of emptyFloors) {
+            inputs[floor - 1].value = '';
+            inputs[floor - 1].dispatchEvent(new Event('input'));
+        }
+        await waitFor(() => document.querySelector('#fm-status').textContent.includes('自动保存第 8 楼'), 'mixed floors cleared');
+        const before = (await state()).keywordCalls.length;
+        document.querySelector('#fm-ai-generate').click();
+        await waitFor(() => document.querySelector('#fm-status').textContent.includes('AI 关键词已保存：6 / 6'), 'mixed response batches saved');
+        const calls = (await state()).keywordCalls.slice(before);
+        assert(calls.length === 2, 'unexpected retry or already-populated floor requested');
+        const floors = calls.map(call => {
+            const input = call.messages.findLast(message => message.content.includes('[{"floor":')).content;
+            return JSON.parse(input.slice(input.indexOf('[{"floor":'), input.lastIndexOf(']') + 1)).map(item => item.floor);
+        });
+        assert(JSON.stringify(floors) === '[[1,2,3],[5,7,8]]', 'nonempty floors entered batch');
+        const next = ctx.chatMetadata[MODULE_KEY].records;
+        assert(emptyFloors.every(floor => next[floor - 1].keywordText === '人物' + floor + ',地点' + floor + ',12，12'), 'direct array mapped by position or bypassed cleanup');
+        assert([4, 6].every(floor => JSON.stringify(next[floor - 1]) === JSON.stringify(beforeRecords[floor - 1])), 'existing keywords were overwritten');
+        cfg.aiKeywordEndpoint = previousEndpoint;
+    });
+    await check('JSON 本地修复后清洗并保存、显示处理说明；缺楼仍拒绝整批写入', async () => {
+        const cfg = ctx.extensionSettings[MODULE_KEY];
+        const previousEndpoint = cfg.aiKeywordEndpoint;
+        cfg.aiKeywordEndpoint = location.origin + '/repair-keywords/v1';
+        const inputs = [...document.querySelectorAll('.fm-record [data-field="keywords"]')];
+        for (const floor of [2, 4, 6]) {
+            inputs[floor - 1].value = '';
+            inputs[floor - 1].dispatchEvent(new Event('input'));
+        }
+        await waitFor(() => document.querySelector('#fm-status').textContent.includes('自动保存第 6 楼'), 'repair targets cleared');
+        const before = (await state()).keywordCalls.length;
+        document.querySelector('#fm-ai-generate').click();
+        await waitFor(() => document.querySelector('#fm-status').textContent.includes('AI 关键词已保存：3 / 3'), 'repaired batch saved');
+        assert((await state()).keywordCalls.length === before + 1, 'repair requested AI again');
+        const next = ctx.chatMetadata[MODULE_KEY].records;
+        assert([2, 4, 6].every(floor => next[floor - 1].keywordText === '人物' + floor + ',地点' + floor + ',12，12'), 'repair skipped cleaning or altered punctuation');
+        const diagnostics = document.querySelector('#fm-ai-diagnostics').textContent;
+        assert(diagnostics.includes('JSON 兼容处理') && diagnostics.includes('多余括号') && diagnostics.includes('字符串楼号'), 'repair summary missing');
+        const saved = JSON.stringify(ctx.chatMetadata);
+        cfg.aiKeywordEndpoint = location.origin + '/invalid-keyword-json/v1';
+        document.querySelector('#fm-ai-write-mode').value = 'replace';
+        document.querySelector('#fm-ai-generate').click();
+        await waitFor(() => document.querySelector('#fm-status').textContent.includes('本批 3 楼（1、2、3），返回 1 项'), 'incomplete JSON result rejected');
+        assert(JSON.stringify(ctx.chatMetadata) === saved, 'incomplete result wrote partial keywords');
+        assert((await state()).keywordCalls.length === before + 2, 'bad data triggered unbounded retry');
+        document.querySelector('#fm-ai-write-mode').value = 'missing';
+        cfg.aiKeywordEndpoint = previousEndpoint;
+    });
+    await check('全量重做逐批保存；后续批次失败时保留已完成结果', async () => {
+        const cfg = ctx.extensionSettings[MODULE_KEY];
+        cfg.aiKeywordEndpoint = location.origin + '/partial-keywords/v1';
+        const old = structuredClone(ctx.chatMetadata[MODULE_KEY].records);
+        document.querySelector('#fm-ai-write-mode').value = 'replace';
+        document.querySelector('#fm-ai-generate').click();
+        await waitFor(() => document.querySelector('#fm-status').textContent.includes('已完成 3 / 8 楼'), 'partial batch failure');
+        const next = ctx.chatMetadata[MODULE_KEY].records;
+        assert(next.slice(0,3).every(record => record.keywordText === '新人物' + record.floor), 'successful first batch not saved');
+        assert(next.slice(3).every((record, i) => record.keywordText === old[i + 3].keywordText), 'failed/later batch corrupted');
+        cfg.aiKeywordEndpoint = location.origin + '/keyword/v1';
+    });
+    await check('回复完成后只自动提取新楼，流式输出时等待，同一楼不重复请求', async () => {
+        const cfg = ctx.extensionSettings[MODULE_KEY];
+        cfg.aiKeywordAuto = true;
+        const before = (await state()).keywordCalls.length;
+        emit('GENERATION_STARTED');
+        ctx.streamingProcessor = { isFinished:false };
+        ctx.chat.push({ name:'向导', is_user:false, mes:'<summary>人物9在地点9得到线索。</summary>', send_date:301 });
+        emit('MESSAGE_RECEIVED', ctx.chat.length - 1);
+        await delay(500);
+        assert((await state()).keywordCalls.length === before, 'automatic extraction ran during streaming');
+        ctx.streamingProcessor.isFinished = true;
+        emit('GENERATION_ENDED');
+        await waitFor(() => ctx.chatMetadata[MODULE_KEY].records[8]?.keywordSource === 'ai', 'automatic keywords');
+        assert((await state()).keywordCalls.length === before + 1, 'auto extraction scanned whole history');
+        assert(ctx.chatMetadata[MODULE_KEY].records[8].keywords.includes('人物9'), 'new reply keywords missing');
+        emit('MESSAGE_RECEIVED', ctx.chat.length - 1);
+        emit('CHARACTER_MESSAGE_RENDERED', ctx.chat.length - 1);
+        emit('GENERATION_ENDED');
+        await delay(650);
+        assert((await state()).keywordCalls.length === before + 1, 'duplicate reply event requested AI again');
+        ctx.chat.push({ name:'旅行者', is_user:true, mes:'问题10' }, { name:'向导', mes:'没有总结的回复' });
+        emit('MESSAGE_RECEIVED', ctx.chat.length - 1);
+        await delay(650);
+        assert((await state()).keywordCalls.length === before + 1, 'missing summary requested keyword extraction');
+        cfg.aiKeywordAuto = false;
+    });
+    await check('AI 请求期间清空会取消迟到结果，之后新触发可以重新填写空关键词', async () => {
+        const cfg = ctx.extensionSettings[MODULE_KEY];
+        cfg.aiKeywordEndpoint = location.origin + '/slow-keywords/v1';
+        const before = (await state()).keywordCalls.length;
+        document.querySelector('#fm-ai-generate').click();
+        await waitFor(async () => (await state()).keywordCalls.length > before, 'slow keyword request');
+        const input = document.querySelector('.fm-record [data-field="keywords"]');
+        input.value = '';
+        input.dispatchEvent(new Event('input'));
+        await delay(2000);
+        assert(ctx.chatMetadata[MODULE_KEY].records[0].keywordText === '' && ctx.chatMetadata[MODULE_KEY].records[0].keywordSource === 'manual', 'late AI result overwrote manual clear');
+        cfg.aiKeywordAuto = true;
+        cfg.aiKeywordEndpoint = location.origin + '/keyword/v1';
+        const count = (await state()).keywordCalls.length;
+        emit('MESSAGE_RECEIVED', 1);
+        await waitFor(() => ctx.chatMetadata[MODULE_KEY].records[0].keywordSource === 'ai', 'fresh event refills empty keywords');
+        assert((await state()).keywordCalls.length === count + 1, 'new trigger skipped manually cleared keywords');
+        cfg.aiKeywordAuto = false;
+        cfg.aiKeywordEndpoint = location.origin + '/slow-keywords/v1';
+    });
+    await check('AI 提取途中切换聊天不会把旧楼关键词写入新聊天', async () => {
+        const before = (await state()).keywordCalls.length;
+        document.querySelector('#fm-ai-generate').click();
+        await waitFor(async () => (await state()).keywordCalls.length > before, 'AI request before chat switch');
+        ctx = { ...ctx, chatId:'ai-next-chat', chatMetadata:{}, chat:[{ name:'向导', mes:'<summary>新聊天自己的总结</summary>' }] };
+        emit('CHAT_CHANGED');
+        await delay(2000);
+        const records = ctx.chatMetadata[MODULE_KEY]?.records;
+        assert(records?.length === 1 && records[0].extracted === '新聊天自己的总结' && !records[0].keywords, 'old AI result contaminated new chat');
+    });
+    ctx.chat = makeChat(); ctx.chatId = 'browser-chat'; ctx.chatMetadata = {};
+    ctx.extensionSettings[MODULE_KEY].endpoint = location.origin + '/mock/v1';
+    document.querySelector('#fm-rescan').click();
+    await waitFor(() => ctx.chatMetadata[MODULE_KEY]?.records.length === 8, 'final display');
+    document.querySelector('#fm-records-panel').open = false;
+    document.querySelector('#browser-test-result').textContent = checks.length + ' browser checks passed';
+    if (tauri) {
+        await check('Android 窄屏设置不溢出，正则仅使用可终止的 classic Blob worker', async () => {
+            assert(document.querySelector('#fm-runtime').textContent.includes('Android'), 'runtime not detected');
+            assert(workerUrls.length > 0 && workerUrls.every(url => url.startsWith('blob:')), 'unexpected worker transport');
+            const panel = document.querySelector('#floor-memory');
+            for (const details of panel.querySelectorAll('details')) details.open = true;
+            assert(document.documentElement.scrollWidth <= innerWidth + 1, 'mobile settings overflow');
+        });
+        await check('导出等待 Android 原生保存，并报告真实保存位置及失败', async () => {
+            const prior = globalThis.__nativeExports?.length ?? 0;
+            document.querySelector('#fm-export').click();
+            await waitFor(() => (globalThis.__nativeExports?.length ?? 0) > prior, 'native download');
+            await waitFor(() => document.querySelector('#fm-status').textContent.includes('Download/'), 'native saved path');
+            const exported = globalThis.__nativeExports.at(-1);
+            assert(exported.fileName.endsWith('.json'), 'wrong filename');
+            assert(exported.data.records.length > 0, 'empty export');
+            assert(!JSON.stringify(exported.data).includes('browser-test-only-key'), 'export leaked key');
+            globalThis.__nativeExportFailure = true;
+            document.querySelector('#fm-export').click();
+            await waitFor(() => document.querySelector('#fm-status').textContent.includes('模拟原生写入失败'), 'native error');
+            globalThis.__nativeExportFailure = false;
+        });
+        await check('Tauri MCP 工具轮与宿主剥离旧工具设置均保持 N/M 楼层和用户消息', async () => {
+            ctx = { ...ctx, chatId:'tauri-tools', chatMetadata:{}, chat:[
+                { name:'旅行者', is_user:true, mes:'搜索青石镇', send_date:1 },
+                { name:'向导', is_user:false, mes:'', tool_calls:[{ id:'call-1' }], send_date:2 },
+                { name:'search', is_system:true, is_user:false, role:'tool', tool_call_id:'call-1', mes:'青石镇资料', send_date:3 },
+                { name:'向导', is_user:false, mes:'<summary>青石镇北门会合</summary>', send_date:4 },
+                { name:'旅行者', is_user:true, mes:'然后呢', send_date:5 },
+                { name:'向导', is_user:false, mes:'<summary>苏岚来到城门</summary>', send_date:6 },
+                { name:'旅行者', is_user:true, mes:'继续', send_date:7 },
+            ], extensionSettings:{ [MODULE_KEY]:{ ...ctx.extensionSettings[MODULE_KEY],
+                enabled:true, aiKeywordAuto:false, recentCount:1, middleCount:1, recallCount:0 } },
+                chatCompletionSettings:{ function_calling:true, strip_old_tool_calls:false } };
+            emit('CHAT_CHANGED');
+            let output = await generate();
+            assert(ctx.chatMetadata[MODULE_KEY].records.length === 2, 'tool call consumed a floor');
+            assert(output[0].mes === '搜索青石镇' && output[1].mes.includes('[近期召回 · 第 1 楼]'), 'middle user/summary missing');
+            assert(!output.some(message => message.role === 'tool' || message.tool_calls), 'compressed tool half retained');
+            ctx.chatCompletionSettings.strip_old_tool_calls = true;
+            const prompt = ctx.chat.filter(message => !message.tool_calls && message.role !== 'tool')
+                .map((message,index) => ({ ...structuredClone(message), index }));
+            output = await generate('normal', prompt);
+            assert(output[1].mes.includes('[近期召回 · 第 1 楼]'), 'stripped source floor mapping changed');
+            document.querySelector('#fm-preview').click();
+            await waitFor(() => document.querySelector('#fm-preview-output').textContent.includes('中间总结 M：第 1 楼'), 'tauri preview');
+        });
+    }
+    globalThis.__testResult = { passed:checks, failures };
+} catch (error) {
+    document.querySelector('#browser-test-result').textContent = error.stack;
+    globalThis.__testResult = { passed:checks, failures: failures.length ? failures : [error.stack] };
+}
+</script></body></html>

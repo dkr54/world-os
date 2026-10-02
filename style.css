@@ -1,0 +1,39 @@
+.floor-memory { --fm-accent: #88c9ba; line-height: 1.5; }
+.floor-memory .inline-drawer-content { padding: 8px 4px; }
+.floor-memory .fm-intro { margin: 4px 0 14px; opacity: .88; }
+.floor-memory label:not(.checkbox_label) { display: flex; flex-direction: column; gap: 5px; margin: 10px 0; }
+.floor-memory .checkbox_label { gap: 8px; margin: 10px 0; align-items: center; }
+.floor-memory input:not([type="checkbox"]), .floor-memory textarea, .floor-memory select { width: 100%; box-sizing: border-box; }
+.floor-memory textarea { resize: vertical; }
+.floor-memory .fm-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.floor-memory .fm-grid-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.floor-memory .fm-flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 10px; margin-top: 12px; border-radius: 8px; background: rgba(136, 201, 186, .1); font-size: .9em; }
+.floor-memory .fm-flow span:nth-child(odd) { color: var(--fm-accent); }
+.floor-memory details { border-top: 1px solid rgba(160, 160, 160, .24); margin-top: 14px; padding-top: 12px; }
+.floor-memory summary { cursor: pointer; font-weight: 600; padding-bottom: 5px; }
+.floor-memory .fm-hint { font-size: .85em; opacity: .72; margin: 6px 0 10px; overflow-wrap: anywhere; }
+.floor-memory .fm-code { font-family: ui-monospace, Consolas, monospace; font-size: .9em; }
+.floor-memory .fm-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 9px 0; }
+.floor-memory .menu_button { width: auto; cursor: pointer; font: inherit; font-size: .88em; padding: 6px 10px; }
+.floor-memory .fm-primary { margin-top: 15px; border-color: var(--fm-accent); }
+.floor-memory .fm-status { padding: 10px; border-left: 3px solid var(--fm-accent); background: rgba(136, 201, 186, .06); overflow-wrap: anywhere; white-space: pre-wrap; }
+.floor-memory .fm-status[data-level="error"] { border-color: #e59595; }
+.floor-memory .fm-status[data-level="warning"] { border-color: #d9bc82; }
+.floor-memory .fm-output { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; max-height: 420px; overflow: auto; padding: 10px; margin: 8px 0; font: .88em/1.6 ui-monospace, Consolas, monospace; background: rgba(0, 0, 0, .12); border-radius: 6px; }
+.floor-memory .fm-rule, .floor-memory .fm-record { border: 1px solid rgba(160, 160, 160, .25); padding: 10px; border-radius: 7px; margin: 10px 0; }
+.floor-memory .fm-rule-head, .floor-memory .fm-record-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.floor-memory .fm-record-head { font-size: .9em; margin-bottom: 6px; }
+.floor-memory .fm-record small { opacity: .7; }
+.floor-memory button:disabled { opacity: .4; cursor: default; }
+@media (max-width: 420px) { .floor-memory .fm-grid { grid-template-columns: 1fr; gap: 0; } }
+
+.floor-memory .fm-diagnostics { white-space: pre-wrap; }
+
+@media (max-width: 600px) {
+    .floor-memory, .floor-memory form, .floor-memory details, .floor-memory label,
+    .floor-memory .fm-grid > *, .floor-memory .fm-rule, .floor-memory .fm-record { min-width: 0; }
+    .floor-memory .fm-rule-head, .floor-memory .fm-record-head { flex-wrap: wrap; }
+    .floor-memory .menu_button { min-height: 40px; white-space: normal; overflow-wrap: anywhere; }
+    .floor-memory input:not([type="checkbox"]), .floor-memory textarea, .floor-memory select { font-size: 16px; }
+    .floor-memory .fm-output { max-height: 55vh; }
+}
