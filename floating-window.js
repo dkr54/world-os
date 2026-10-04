@@ -1,25 +1,27 @@
 import { MODULE_KEY } from './core.js';
 
-/** Keep one live form in a native dialog, preserving drafts and host back navigation. */
+/** World OS shell: retain live app pages, drafts, and the native mobile dialog contract. */
 export function mountFloatingWindow(panel, { host, enabled, onEnabledChange }) {
     const launcher = document.createElement('button');
-    launcher.id = 'fm-launcher';
+    launcher.id = 'wo-launcher';
     launcher.type = 'button';
-    launcher.className = 'fm-launcher';
-    launcher.textContent = '楼层记忆';
+    launcher.className = 'wo-launcher';
+    launcher.textContent = 'world os';
+    launcher.setAttribute('aria-label', '打开 world os');
+    launcher.title = 'world os（拖动调整位置）';
     launcher.setAttribute('aria-haspopup', 'dialog');
     launcher.setAttribute('aria-controls', panel.id);
     launcher.setAttribute('aria-expanded', 'false');
 
     const compact = document.createElement('div');
-    compact.id = 'floor-memory-settings';
+    compact.id = 'world-os-settings';
     compact.className = 'floor-memory fm-compact';
     const label = document.createElement('label');
     label.className = 'checkbox_label';
     const toggle = document.createElement('input');
     toggle.type = 'checkbox';
     toggle.id = 'fm-enabled';
-    label.append(toggle, document.createTextNode('启用楼层记忆'));
+    label.append(toggle, document.createTextNode('world os · 启用楼层记忆'));
     compact.append(label);
     host.append(compact);
     document.body.append(launcher, panel);
@@ -29,15 +31,13 @@ export function mountFloatingWindow(panel, { host, enabled, onEnabledChange }) {
     launcher.dataset.ttMobileSurface = 'free-window';
 
     const insideToggle = panel.querySelector('[name="enabled"]');
-    const closeButton = panel.querySelector('#fm-window-close');
-    const scroll = panel.querySelector('.fm-window-body');
+    const closeButton = panel.querySelector('#wo-window-close');
+    const scroll = panel.querySelector('.wo-window-body');
     const setEnabled = value => {
         toggle.checked = insideToggle.checked = Boolean(value);
         const state = value ? '已启用' : '已关闭';
         panel.querySelector('#fm-enabled-state').textContent = state;
-        launcher.dataset.enabled = String(Boolean(value));
-        launcher.setAttribute('aria-label', '打开楼层记忆（' + state + '）');
-        launcher.title = '楼层记忆 · ' + state + '（拖动调整位置）';
+        panel.querySelector('#wo-open-floor-memory').setAttribute('aria-label', '楼层记忆（' + state + '）');
     };
     for (const input of [toggle, insideToggle]) {
         input.addEventListener('change', () => {
@@ -47,22 +47,61 @@ export function mountFloatingWindow(panel, { host, enabled, onEnabledChange }) {
     }
     setEnabled(enabled);
 
+    const pages = new Map([...panel.querySelectorAll('[data-wo-page]')].map(page => [page.dataset.woPage, page]));
+    const appButtons = new Map([...panel.querySelectorAll('[data-wo-app]')].map(button => [button.dataset.woApp, button]));
+    const back = panel.querySelector('#wo-back');
+    const title = panel.querySelector('#wo-window-title');
+    const positions = new Map();
+    let currentPage = 'home';
+    const rememberScroll = () => { if (panel.open) positions.set(currentPage, scroll.scrollTop); };
+    const showPage = (name, focus = true) => {
+        const target = pages.get(name);
+        if (!target) return;
+        rememberScroll();
+        const previous = currentPage;
+        currentPage = name;
+        for (const [key, page] of pages) page.hidden = key !== name;
+        panel.dataset.page = name;
+        title.textContent = target.dataset.woTitle;
+        back.hidden = name === 'home';
+        panel.querySelector('#fm-enabled-state').hidden = name !== 'floor-memory';
+        scroll.scrollTop = positions.get(name) ?? 0;
+        panel.dispatchEvent(new CustomEvent('world-os:page', { detail: { name } }));
+        if (focus && panel.open) {
+            const control = name === 'home' ? appButtons.get(previous) ?? closeButton : back;
+            control.focus({ preventScroll: true });
+        }
+    };
+    for (const [name, button] of appButtons) button.addEventListener('click', () => showPage(name));
+    back.addEventListener('click', () => showPage('home'));
+    scroll.addEventListener('scroll', rememberScroll);
+    showPage('home', false);
+
     let suppressClick = false;
-    let savedScrollTop = 0;
-    scroll.addEventListener('scroll', () => { if (panel.open) savedScrollTop = scroll.scrollTop; });
-    const close = () => { savedScrollTop = scroll.scrollTop; panel.close(); };
+    const close = () => { rememberScroll(); panel.close(); };
+    const finishClose = () => {
+        if (panel.open) return;
+        launcher.setAttribute('aria-expanded', 'false');
+        launcher.focus({ preventScroll: true });
+    };
     panel.addEventListener('beforetoggle', event => {
-        if (event.newState === 'closed') savedScrollTop = scroll.scrollTop;
+        if (event.newState === 'closed') {
+            rememberScroll();
+            // Run after close() removes modality, without waiting for a rendering frame.
+            // Older WebViews without beforetoggle still use the native close event below.
+            queueMicrotask(finishClose);
+        }
     });
     launcher.addEventListener('click', event => {
         if (suppressClick && event.detail !== 0) { suppressClick = false; return; }
         suppressClick = false;
         if (panel.open) return;
         // The host back handler closes the last open dialog in DOM order.
+        showPage('home', false);
         document.body.append(panel);
         panel.showModal();
         closeButton.focus({ preventScroll: true });
-        scroll.scrollTop = savedScrollTop;
+        scroll.scrollTop = positions.get('home') ?? 0;
         launcher.setAttribute('aria-expanded', 'true');
     });
     closeButton.addEventListener('click', close);
@@ -70,13 +109,10 @@ export function mountFloatingWindow(panel, { host, enabled, onEnabledChange }) {
     panel.addEventListener('keydown', event => {
         if (event.key === 'Escape') event.stopPropagation();
     });
-    panel.addEventListener('close', () => {
-        if (panel.open) return;
-        launcher.setAttribute('aria-expanded', 'false');
-        launcher.focus({ preventScroll: true });
-    });
+    panel.addEventListener('close', finishClose);
 
-    // Store ratios, so rotating/resizing cannot strand the entrance off screen.
+    // Preserve the existing launcher storage key during the World OS rename.
+    // Ratios keep the entrance reachable after rotating or resizing.
     const positionKey = MODULE_KEY + '.launcherPosition';
     let position = { x: 1, y: 0.72 };
     try {
@@ -106,7 +142,7 @@ export function mountFloatingWindow(panel, { host, enabled, onEnabledChange }) {
         return { x: (x - area.left) / (area.right - area.left || 1), y: (y - area.top) / (area.bottom - area.top || 1) };
     };
     const refreshLayout = () => {
-        panel.style.setProperty('--fm-viewport-height', (globalThis.visualViewport?.height ?? innerHeight) + 'px');
+        panel.style.setProperty('--wo-viewport-height', (globalThis.visualViewport?.height ?? innerHeight) + 'px');
         const area = bounds();
         place(area.left + position.x * (area.right - area.left), area.top + position.y * (area.bottom - area.top));
     };
@@ -142,8 +178,8 @@ export function mountFloatingWindow(panel, { host, enabled, onEnabledChange }) {
     try {
         const layout = globalThis.__TAURITAVERN__?.api?.layout;
         if (layout) Promise.resolve(layout.subscribe(value => { snapshot = value; refreshLayout(); }))
-            .catch(error => console.warn('[Floor Memory] Layout subscription:', error.message));
-    } catch (error) { console.warn('[Floor Memory] Layout subscription:', error.message); }
+            .catch(error => console.warn('[world os] Layout subscription:', error.message));
+    } catch (error) { console.warn('[world os] Layout subscription:', error.message); }
     refreshLayout();
-    return { setEnabled };
+    return { setEnabled, openApp(name) { if (!panel.open) launcher.click(); showPage(name); } };
 }

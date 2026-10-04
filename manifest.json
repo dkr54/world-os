@@ -1,13 +1,13 @@
 {
-  "display_name": "楼层记忆 · Floor Memory",
+  "display_name": "world os",
   "loading_order": 1,
   "requires": [],
   "optional": [],
   "js": "index.js",
   "css": "style.css",
   "author": "dkr54",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "minimum_client_version": "1.13.0",
   "generate_interceptor": "floorMemoryInterceptor",
-  "homePage": "https://github.com/dkr54/floor-memory"
+  "homePage": "https://github.com/dkr54/world-os"
 }

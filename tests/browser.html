@@ -3,6 +3,8 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Floor Memory Browser Integration</title>
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/test-native-icons/css/fontawesome.min.css">
+  <link rel="stylesheet" href="/test-native-icons/css/solid.min.css">
   <style>
     body { margin:0; padding:24px; color:#e5e5e8; background:#1c2027; font:15px/1.5 system-ui,sans-serif; }
     main { max-width:620px; margin:auto; }
@@ -10,10 +12,14 @@
     .checkbox_label { display:flex; }
     .menu_button { color:inherit; background:#2b3542; border:1px solid #536073; border-radius:5px; }
     .inline-drawer-header { font-size:20px; padding:12px 0; }
+    #send_form { position:fixed; bottom:0; left:0; display:flex; flex-wrap:wrap; width:100%; background:#20262c; box-sizing:border-box; }
+    #nonQRFormItems { order:25; width:100%; padding:8px; box-sizing:border-box; }
+    #send_textarea { width:100%; min-height:65px; box-sizing:border-box; background:#262d37; color:inherit; }
     #browser-test-result { color:#9bddb4; white-space:pre-wrap; }
   </style>
 </head>
 <body><main><h1 style="font-size:15px;opacity:.6">SillyTavern extension test host</h1><div id="extensions_settings2"></div><pre id="browser-test-result"></pre></main>
+<div id="send_form"><div id="nonQRFormItems"><textarea id="send_textarea" aria-label="聊天输入"></textarea></div></div>
 <script type="module">
 import { DEFAULT_SETTINGS, MODULE_KEY, isVisible } from '/core.js';
 import { VectorCache } from '/embeddings.js';
@@ -32,7 +38,7 @@ async function waitFor(predicate, label, timeout = 7000) {
     throw new Error('Timeout: ' + label);
 }
 const listeners = new Map();
-const eventNames = ['CHAT_CHANGED','CHAT_LOADED','MESSAGE_RECEIVED','MESSAGE_SENT','MESSAGE_UPDATED','MESSAGE_EDITED','MESSAGE_DELETED','MESSAGE_SWIPED','MESSAGE_SWIPE_DELETED','GENERATION_STARTED','GENERATION_ENDED','GENERATION_STOPPED','CHARACTER_MESSAGE_RENDERED'];
+const eventNames = ['WORLDINFO_ENTRIES_LOADED','WORLDINFO_SCAN_DONE','CHAT_CHANGED','CHAT_LOADED','MESSAGE_RECEIVED','MESSAGE_SENT','MESSAGE_UPDATED','MESSAGE_EDITED','MESSAGE_DELETED','MESSAGE_SWIPED','MESSAGE_SWIPE_DELETED','GENERATION_STARTED','GENERATION_ENDED','GENERATION_STOPPED','CHARACTER_MESSAGE_RENDERED'];
 const eventSource = { on: (name, callback) => {
     if (!listeners.has(name)) listeners.set(name, []);
     listeners.get(name).push(callback);
@@ -110,9 +116,10 @@ async function generate(type = 'normal', prompt = promptFor()) {
     return prompt;
 }
 const state = () => fetch('/__state').then(response => response.json());
+const enterMemory = () => document.querySelector('#wo-open-floor-memory').click();
 
 try {
-    await import(tauri ? '/scripts/extensions/third-party/floor-memory/index.js' : '/index.js');
+    await import(tauri ? '/scripts/extensions/third-party/floor-memory/index.js' : '/scripts/extensions/third-party/world-os/index.js');
     if (tauri) await check('等待 Tauri 宿主 ready 后再挂载扩展设置', async () => {
         await delay(50);
         assert(!document.querySelector('#fm-form'), 'mounted before host ready');
@@ -121,21 +128,55 @@ try {
     await delay(450);
     await check('扩展页只保留启用开关；关闭状态也能从首页打开独立悬浮窗口', async () => {
         const host = document.querySelector('#extensions_settings2');
-        const panel = document.querySelector('#floor-memory');
-        const launcher = document.querySelector('#fm-launcher');
+        const panel = document.querySelector('#world-os');
+        const launcher = document.querySelector('#wo-launcher');
         assert(host.querySelectorAll('input,button,select,textarea').length === 1, 'extension page still contains full settings');
         assert(host.querySelector('#fm-enabled')?.type === 'checkbox', 'enable switch missing');
         assert(!host.contains(panel) && panel.parentElement === document.body, 'window still nested in extension drawer');
         assert(!panel.open && launcher.getBoundingClientRect().width > 0, 'initial window/launcher visibility wrong');
+        assert(launcher.textContent === 'world os', 'old launcher branding remains');
         launcher.click();
         assert(panel.open && panel.matches(':modal'), 'launcher did not open modal');
-        assert(document.activeElement === document.querySelector('#fm-window-close'), 'opening unexpectedly focused an input');
+        assert(panel.dataset.page === 'home' && !document.querySelector('#wo-home').hidden, 'launcher skipped app home');
+        assert(document.querySelector('#floor-memory').hidden && document.querySelector('#wo-back').hidden, 'feature or back visible on home');
+        assert(document.querySelector('#wo-open-floor-memory .fa-book') && document.querySelector('.wo-app-label').textContent === '楼层记忆', 'native book icon or app caption missing');
+        assert(document.activeElement === document.querySelector('#wo-window-close'), 'opening unexpectedly focused an input');
         assert(launcher.getAttribute('aria-expanded') === 'true', 'launcher state not updated');
         launcher.click();
-        assert(document.querySelectorAll('#floor-memory').length === 1 && document.querySelectorAll('#fm-form').length === 1, 'duplicate window mounted');
+        assert(document.querySelectorAll('#world-os').length === 1 && document.querySelectorAll('#fm-form').length === 1, 'duplicate window mounted');
+    });
+    await check('书本图标打开独立功能页；全新启动时所有栏目默认收起', async () => {
+        enterMemory();
+        const panel = document.querySelector('#world-os');
+        assert(panel.dataset.page === 'floor-memory' && !document.querySelector('#floor-memory').hidden, 'feature page not opened');
+        assert(document.querySelector('#wo-home').hidden && !document.querySelector('#wo-back').hidden, 'home/back did not switch');
+        assert(document.querySelector('#wo-window-title').textContent === '楼层记忆', 'feature title incorrect');
+        assert([...panel.querySelectorAll('details')].every(details => !details.open), 'a section still defaults to expanded');
+        const back = document.querySelector('#wo-back').getBoundingClientRect();
+        const title = document.querySelector('#wo-window-title').getBoundingClientRect();
+        assert(back.left < title.left && back.width >= 44 && back.height >= 44, 'back button not reachable at upper left');
+    });
+    await check('返回功能选择再进入时保留同一表单、草稿和滚动位置，不改旧配置或聊天数据', async () => {
+        const form = document.querySelector('#fm-form');
+        const before = JSON.stringify([ctx.extensionSettings, ctx.chatMetadata, ctx.chat]);
+        const original = form.elements.extractPattern.value;
+        form.elements.extractPattern.value = '未保存的总结提取规则';
+        document.querySelector('#floor-memory details').open = true;
+        const scroll = document.querySelector('.wo-window-body');
+        scroll.scrollTop = 150;
+        const top = scroll.scrollTop;
+        document.querySelector('#wo-back').click();
+        assert(document.querySelector('#world-os').open && document.querySelector('#world-os').dataset.page === 'home', 'back closed the window');
+        assert(form.getClientRects().length === 0 && document.activeElement === document.querySelector('#wo-open-floor-memory'), 'hidden page still visible or focus not returned');
+        enterMemory();
+        assert(document.querySelector('#fm-form') === form && form.elements.extractPattern.value === '未保存的总结提取规则', 'navigation rebuilt or reset form');
+        assert(scroll.scrollTop === top && document.querySelector('#floor-memory details').open, 'navigation reset view state');
+        assert(JSON.stringify([ctx.extensionSettings, ctx.chatMetadata, ctx.chat]) === before, 'page navigation mutated saved data');
+        form.elements.extractPattern.value = original;
+        scroll.scrollTop = 0;
     });
     await check('扩展启用开关立即保存且同步窗口，不提交其他设置草稿', async () => {
-        const panel = document.querySelector('#floor-memory');
+        const panel = document.querySelector('#world-os');
         const form = document.querySelector('#fm-form');
         const saved = structuredClone(ctx.extensionSettings[MODULE_KEY]);
         form.elements.recentCount.value = '777';
@@ -147,7 +188,8 @@ try {
         assert(ctx.extensionSettings[MODULE_KEY].recentCount === saved.recentCount && ctx.extensionSettings[MODULE_KEY].extractPattern === saved.extractPattern, 'toggle submitted unrelated invalid draft');
         toggle.click();
         assert(!ctx.extensionSettings[MODULE_KEY].enabled, 'disable switch not immediate');
-        document.querySelector('#fm-launcher').click();
+        document.querySelector('#wo-launcher').click();
+        enterMemory();
         assert(form.elements.recentCount.value === '777' && form.elements.extractPattern.value === '[', 'close/open lost settings draft');
         form.elements.enabled.click();
         assert(toggle.checked && ctx.extensionSettings[MODULE_KEY].enabled, 'inside toggle not synchronized');
@@ -156,23 +198,26 @@ try {
         form.elements.extractPattern.value = saved.extractPattern;
     });
     await check('关闭与 Escape 取消事件保留预设草稿和滚动位置，并恢复入口焦点', async () => {
-        const panel = document.querySelector('#floor-memory');
-        const scroll = panel.querySelector('.fm-window-body');
+        const panel = document.querySelector('#world-os');
+        const scroll = panel.querySelector('.wo-window-body');
         const content = panel.querySelector('.fm-ai-prompt [data-field="content"]');
         const saved = content.value;
         content.value = '尚未保存的预设草稿';
         scroll.scrollTop = 150;
         const position = scroll.scrollTop;
-        document.querySelector('#fm-window-close').click();
-        await waitFor(() => document.querySelector('#fm-launcher').getAttribute('aria-expanded') === 'false', 'close cleanup');
-        assert(document.activeElement === document.querySelector('#fm-launcher'), 'focus not restored');
-        document.querySelector('#fm-launcher').click();
+        document.querySelector('#wo-window-close').click();
+        await waitFor(() => document.querySelector('#wo-launcher').getAttribute('aria-expanded') === 'false', 'close cleanup');
+        assert(document.activeElement === document.querySelector('#wo-launcher'), 'focus not restored');
+        document.querySelector('#wo-launcher').click();
+        assert(panel.dataset.page === 'home', 'reopen did not start on app home');
+        enterMemory();
         assert(content.value === '尚未保存的预设草稿' && scroll.scrollTop === position, 'window reopen reset draft or scroll');
         const event = new Event('cancel', { cancelable:true });
         panel.dispatchEvent(event);
         assert(event.defaultPrevented && !panel.open, 'native cancel not handled');
         await delay(30);
-        document.querySelector('#fm-launcher').click();
+        document.querySelector('#wo-launcher').click();
+        enterMemory();
         content.value = saved;
         scroll.scrollTop = 0;
     });
@@ -807,16 +852,16 @@ try {
         await check('Android 窄屏设置不溢出，正则仅使用可终止的 classic Blob worker', async () => {
             assert(document.querySelector('#fm-runtime').textContent.includes('Android'), 'runtime not detected');
             assert(workerUrls.length > 0 && workerUrls.every(url => url.startsWith('blob:')), 'unexpected worker transport');
-            const panel = document.querySelector('#floor-memory');
+            const panel = document.querySelector('#world-os');
             for (const details of panel.querySelectorAll('details')) details.open = true;
-            const scroll = panel.querySelector('.fm-window-body');
+            const scroll = panel.querySelector('.wo-window-body');
             assert(panel.open && document.documentElement.scrollWidth <= innerWidth + 1, 'mobile settings overflow');
             assert(scroll.scrollWidth <= scroll.clientWidth + 1, 'window content overflows horizontally');
         });
         await check('Tauri 安全边距和局部键盘高度生效，关闭按钮与底部表单均可达', async () => {
-            const panel = document.querySelector('#floor-memory');
+            const panel = document.querySelector('#world-os');
             assert(panel.dataset.ttMobileSurface === 'fullscreen-window', 'dialog not opted into mobile layout');
-            assert(document.querySelector('#fm-launcher').dataset.ttMobileSurface === 'free-window', 'launcher surface not opted in');
+            assert(document.querySelector('#wo-launcher').dataset.ttMobileSurface === 'free-window', 'launcher surface not opted in');
             assert(layoutListeners.size === 1, 'host layout not subscribed exactly once');
             const root = document.documentElement;
             const insets = { top:32, right:12, bottom:24, left:6 };
@@ -828,18 +873,26 @@ try {
             const rect = panel.getBoundingClientRect();
             assert(rect.top >= insets.top && rect.left >= insets.left && rect.right <= innerWidth - insets.right, 'dialog outside safe area');
             assert(rect.bottom <= innerHeight - 320 + 1, 'dialog hidden behind keyboard');
-            const scroll = panel.querySelector('.fm-window-body');
+            const scroll = panel.querySelector('.wo-window-body');
             scroll.scrollTop = scroll.scrollHeight;
-            const close = panel.querySelector('#fm-window-close').getBoundingClientRect();
+            const close = panel.querySelector('#wo-window-close').getBoundingClientRect();
             const last = panel.querySelector('#fm-next-page').getBoundingClientRect();
             assert(close.top >= rect.top && close.bottom < rect.bottom, 'close button scrolled out');
             assert(last.bottom <= rect.bottom && last.top >= close.bottom, 'bottom controls unreachable');
             const draft = panel.querySelector('[name="model"]').value;
             // Android host closes the topmost native dialog through close().
-            [...document.querySelectorAll('dialog[open]')].at(-1).close();
-            await delay(30);
-            assert(!panel.open && document.querySelector('#fm-launcher').getAttribute('aria-expanded') === 'false', 'native back close did not clean up');
-            document.querySelector('#fm-launcher').click();
+            const closeTrace = [];
+            panel.addEventListener('close', () => closeTrace.push({ event:'close', open:panel.open, aria:document.querySelector('#wo-launcher').getAttribute('aria-expanded') }), { once:true });
+            panel.addEventListener('beforetoggle', event => closeTrace.push({ event:'beforetoggle', newState:event.newState, open:panel.open }), { once:true });
+            const nativeTarget = [...document.querySelectorAll('dialog[open]')].at(-1);
+            nativeTarget.close();
+            try {
+                await waitFor(() => !panel.open && document.querySelector('#wo-launcher').getAttribute('aria-expanded') === 'false', 'native back close cleanup');
+            } catch (error) {
+                throw new Error(error.message + ' ' + JSON.stringify({ target:nativeTarget.id, panel:panel.id, open:panel.open, aria:document.querySelector('#wo-launcher').getAttribute('aria-expanded'), closeTrace }));
+            }
+            document.querySelector('#wo-launcher').click();
+            enterMemory();
             assert(panel.querySelector('[name="model"]').value === draft, 'native back discarded draft');
             for (const edge of Object.keys(insets)) root.style.removeProperty('--tt-inset-' + edge);
             root.style.removeProperty('--tt-base-viewport-height');
@@ -887,6 +940,8 @@ try {
             await waitFor(() => document.querySelector('#fm-preview-output').textContent.includes('中间总结 M：第 1 楼'), 'tauri preview');
         });
     }
+    const { runCalendarChecks } = await import('/tests/calendar-browser.js');
+    await runCalendarChecks({ check, assert, waitFor, delay, emit, getContext:()=>ctx, setContext:value=>{ctx=value;}, tauri, testLayout, layoutListeners });
     globalThis.__testResult = { passed:checks, failures };
 } catch (error) {
     document.querySelector('#browser-test-result').textContent = error.stack;

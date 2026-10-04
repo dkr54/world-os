@@ -1,10 +1,26 @@
-<dialog id="floor-memory" class="floor-memory fm-window" aria-labelledby="fm-window-title">
-  <header class="fm-window-header">
-    <h2 id="fm-window-title">楼层记忆</h2>
-    <span id="fm-enabled-state" class="fm-enabled-state">已关闭</span>
-    <button type="button" id="fm-window-close" class="menu_button" aria-label="关闭楼层记忆" title="关闭窗口" autofocus>×</button>
+<dialog id="world-os" class="world-os wo-window" aria-labelledby="wo-window-title">
+  <header class="wo-window-header">
+    <button type="button" id="wo-back" class="menu_button wo-header-button" aria-label="返回 world os 功能选择" title="返回功能选择" hidden><i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>
+    <h2 id="wo-window-title">world os</h2>
+    <span id="fm-enabled-state" class="fm-enabled-state" hidden>已关闭</span>
+    <button type="button" id="wo-window-close" class="menu_button wo-header-button" aria-label="关闭 world os" title="关闭窗口" autofocus>×</button>
   </header>
-  <div class="fm-window-body">
+  <div class="wo-window-body">
+    <section id="wo-home" class="wo-home" data-wo-page="home" data-wo-title="world os" aria-label="world os 功能选择">
+      <p class="wo-home-description">世界操作系统</p>
+      <p class="wo-section-label">内置应用</p>
+      <nav class="wo-app-grid" aria-label="内置功能">
+        <button type="button" id="wo-open-floor-memory" class="wo-app" data-wo-app="floor-memory" aria-controls="floor-memory">
+          <span class="wo-app-icon"><i class="fa-solid fa-book" aria-hidden="true"></i></span>
+          <span class="wo-app-label">楼层记忆</span>
+        </button>
+        <button type="button" id="wo-open-calendar" class="wo-app" data-wo-app="calendar" aria-controls="wo-calendar">
+          <span class="wo-app-icon wo-calendar-icon"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i></span>
+          <span class="wo-app-label">日历</span>
+        </button>
+      </nav>
+    </section>
+    <section id="floor-memory" class="floor-memory" data-wo-page="floor-memory" data-wo-title="楼层记忆" aria-label="楼层记忆功能页" hidden>
       <p class="fm-intro">把回复中的总结变成长期记忆。每条模型回复及其前面的用户消息算一楼。</p>
       <p id="fm-runtime" class="fm-hint"></p>
         <form id="fm-form">
@@ -19,7 +35,7 @@
         <label>中间 M 楼缺少总结时
           <select class="text_pole" name="missingSummary"><option value="original">保留这一整楼原文</option><option value="omit">保留用户消息，略过模型回复</option></select>
         </label>
-        <details open>
+        <details>
           <summary>① 正则：先清洗，再提取</summary>
           <p class="fm-hint">规则按列表顺序执行，只处理提取用的副本。最近 N 楼原文不受这些规则影响。支持 JavaScript 正则、替换中的 $1 和 /pattern/flags 写法。</p>
           <div id="fm-cleanup-rules"></div>
@@ -37,7 +53,7 @@
             <pre id="fm-regex-output" class="fm-output" aria-live="polite"></pre>
           </details>
         </details>
-        <details open>
+        <details>
           <summary>② 关键词优先</summary>
           <label class="checkbox_label"><input type="checkbox" name="keywordEnabled">启用关键词召回</label>
           <label>查询最近几条用户消息 D（含中间模型回复）<input class="text_pole" type="number" name="queryFloors" min="0" max="10000" required></label>
@@ -168,5 +184,75 @@
         <div id="fm-records"></div>
         <div class="fm-actions"><button class="menu_button" type="button" id="fm-prev-page">上一页</button><span id="fm-page"></span><button class="menu_button" type="button" id="fm-next-page">下一页</button></div>
       </details>
+    </section>
+    <section id="wo-calendar" class="wo-calendar floor-memory" data-wo-page="calendar" data-wo-title="日历" aria-label="日历功能页" hidden>
+      <p id="wo-cal-scope" class="fm-hint"></p>
+      <p id="wo-cal-status" class="fm-status" role="status" aria-live="polite"></p>
+      <div class="wo-cal-today">
+        <div><small>本聊天当前日期</small><strong id="wo-cal-today"></strong><span id="wo-cal-today-holidays"></span></div>
+        <button type="button" id="wo-cal-advance-open" class="menu_button"><i class="fa-solid fa-clock" aria-hidden="true"></i> 推进时间</button>
+      </div>
+      <fieldset id="wo-cal-controls" class="wo-cal-controls">
+        <div class="wo-cal-month-controls">
+          <button type="button" id="wo-cal-prev-month" class="menu_button" aria-label="上一个月"><i class="fa-solid fa-chevron-left" aria-hidden="true"></i></button>
+          <label>年份<input id="wo-cal-view-year" class="text_pole" type="number" min="1" step="1" inputmode="numeric" value="1"></label>
+          <label>月份<select id="wo-cal-view-month" class="text_pole"></select></label>
+          <button type="button" id="wo-cal-next-month" class="menu_button" aria-label="下一个月"><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></button>
+        </div>
+        <div id="wo-cal-days" class="wo-cal-days" aria-label="本月日期"></div>
+        <div id="wo-cal-day-paging" class="fm-actions" hidden>
+          <button type="button" id="wo-cal-prev-days" class="menu_button">前一页日期</button><span id="wo-cal-day-range"></span>
+          <button type="button" id="wo-cal-next-days" class="menu_button">后一页日期</button>
+        </div>
+        <p class="fm-hint">点击某一天添加节日或纪念日。带圆点的日期已有标记；浏览日历不会改变聊天日期。</p>
+
+        <details id="wo-cal-rules-panel">
+          <summary>日历规则 · 当前角色的所有聊天共享</summary>
+          <form id="wo-cal-rules-form">
+            <label>日历名（可留空）<input id="wo-cal-name" class="text_pole" type="text" placeholder="例如：星河历"></label>
+            <label class="checkbox_label"><input id="wo-cal-enabled" type="checkbox">启用时间快捷操作和节日设定注入</label>
+            <div class="fm-grid fm-grid-two">
+              <label>每年月份数<input id="wo-cal-month-count" class="text_pole" type="number" min="1" max="1000" step="1" inputmode="numeric"></label>
+              <button type="button" id="wo-cal-resize-months" class="menu_button">按月份数调整数组</button>
+            </div>
+            <label>每月天数（按月份顺序填写数组）<textarea id="wo-cal-months" class="text_pole fm-code" rows="3" spellcheck="false"></textarea></label>
+            <p class="fm-hint">例如 [30,31,28] 表示一年 3 个月，依次有 30、31、28 天。每年使用相同月长，不自动换算公历闰年或农历。修改后，如某个聊天的旧日期已不存在，可在下方重新设置该聊天的日期。</p>
+            <button type="submit" class="menu_button">保存日历规则</button>
+          </form>
+        </details>
+        <details id="wo-cal-date-panel">
+          <summary>设置本聊天的当前日期</summary>
+          <form id="wo-cal-date-form">
+            <div class="fm-grid wo-cal-date-fields">
+              <label>年<input id="wo-cal-date-year" class="text_pole" type="number" min="1" step="1" inputmode="numeric"></label>
+              <label>月<input id="wo-cal-date-month" class="text_pole" type="number" min="1" step="1" inputmode="numeric"></label>
+              <label>日<input id="wo-cal-date-day" class="text_pole" type="number" min="1" step="1" inputmode="numeric"></label>
+            </div>
+            <p class="fm-hint">只修改当前聊天的日期。使用“推进时间”可以同时把时间提示词加入聊天输入框。</p>
+            <button type="submit" class="menu_button">保存当前日期</button>
+          </form>
+        </details>
+        <details id="wo-cal-holiday-panel">
+          <summary id="wo-cal-holiday-title">添加节日 / 纪念日</summary>
+          <form id="wo-cal-holiday-form">
+            <input id="wo-cal-holiday-id" type="hidden">
+            <label>节日名<input id="wo-cal-holiday-name" class="text_pole" type="text" required placeholder="例如：灯火节"></label>
+            <label class="checkbox_label"><input id="wo-cal-holiday-annual" type="checkbox" checked>每年重复</label>
+            <div class="fm-grid wo-cal-date-fields">
+              <label>年<input id="wo-cal-holiday-year" class="text_pole" type="number" min="1" step="1" inputmode="numeric" disabled></label>
+              <label>月<input id="wo-cal-holiday-month" class="text_pole" type="number" min="1" step="1" inputmode="numeric" required></label>
+              <label>日<input id="wo-cal-holiday-day" class="text_pole" type="number" min="1" step="1" inputmode="numeric" required></label>
+            </div>
+            <label>节日介绍与设定提示词<textarea id="wo-cal-holiday-prompt" class="text_pole" rows="5" placeholder="描述节日的由来、习俗以及这一天的世界设定。"></textarea></label>
+            <p class="fm-hint">当前聊天日期为该节日时，这段内容会加入“World Info 后”的末尾。留空则只标记日期和填写节日名。同一天可以添加多个节日。</p>
+            <div class="fm-actions"><button type="submit" class="menu_button">保存节日</button><button type="button" id="wo-cal-new-holiday" class="menu_button">新建另一项</button></div>
+          </form>
+        </details>
+        <details id="wo-cal-holidays-panel">
+          <summary>已设定的节日与纪念日</summary>
+          <div id="wo-cal-holidays"></div>
+        </details>
+      </fieldset>
+    </section>
   </div>
 </dialog>

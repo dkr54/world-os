@@ -6,6 +6,7 @@ import {
 } from './core.js';
 import { RegexRunner } from './regex-runner.js';
 import { mountFloatingWindow } from './floating-window.js';
+import { mountCalendar } from './calendar.js';
 import { waitForHostReady, runtimeLabel, tauriPromptSource, downloadMemory } from './host-runtime.js';
 import {
     VectorCache, EmbeddingIndex, requestEmbeddings, embeddingUrl, requestModels, modelsUrl,
@@ -587,7 +588,7 @@ async function initialize() {
     root = template.content.firstElementChild;
     const host = document.querySelector('#extensions_settings2') ?? document.querySelector('#extensions_settings');
     if (!host) throw new Error('找不到 SillyTavern 扩展设置区域。');
-    if (document.querySelector('#floor-memory')) return;
+    if (document.querySelector('#world-os')) return;
     floatingWindow = mountFloatingWindow(root, {
         host, enabled: settings().enabled,
         onEnabledChange(enabled) {
@@ -600,6 +601,7 @@ async function initialize() {
             scheduleSync();
         },
     });
+    mountCalendar(root, { getContext: context, openApp: floatingWindow.openApp });
     fillForm();
     root.querySelector('#fm-runtime').textContent = '运行环境：' + runtimeLabel();
     for (const picker of [
@@ -760,6 +762,6 @@ const ready = document.readyState === 'loading'
     ? new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true }))
     : Promise.resolve();
 ready.then(initialize).catch(error => {
-    globalThis.toastr?.error?.(error.message, '楼层记忆初始化失败');
-    console.error('[Floor Memory] Initialization failed:', error.message);
+    globalThis.toastr?.error?.(error.message, 'world os 初始化失败');
+    console.error('[world os] Initialization failed:', error.message);
 });

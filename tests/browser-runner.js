@@ -113,7 +113,21 @@ const server = createServer(async (request, response) => {
             }`);
             return;
         }
-        const assetPath = url.pathname.replace(/^\/scripts\/extensions\/third-party\/floor-memory\//, '/');
+        const iconAssets = {
+            '/test-native-icons/css/fontawesome.min.css': { file:'.tmp/native-icon-test/css/fontawesome.min.css', type:'text/css' },
+            '/test-native-icons/css/solid.min.css': { file:'.tmp/native-icon-test/css/solid.min.css', type:'text/css' },
+            '/test-native-icons/webfonts/fa-solid-900.woff2': { file:'.tmp/native-icon-test/webfonts/fa-solid-900.woff2', type:'font/woff2' },
+        };
+        if (iconAssets[url.pathname]) {
+            const asset = iconAssets[url.pathname];
+            // Optional local host assets for visual review; no network dependency in tests.
+            let body;
+            try { body = await readFile(resolve(workspace, asset.file)); } catch { body = Buffer.alloc(0); }
+            response.writeHead(200, { 'Content-Type':asset.type, 'Cache-Control':'no-store' });
+            response.end(body);
+            return;
+        }
+        const assetPath = url.pathname.replace(/^\/scripts\/extensions\/third-party\/(?:floor-memory|world-os)\//, '/');
         const path = resolve(workspace, '.' + decodeURIComponent(assetPath));
         if (!path.startsWith(workspace + sep)) { response.writeHead(403); response.end(); return; }
         const body = await readFile(path);
@@ -128,7 +142,7 @@ const port = server.address().port;
 await mkdir(artifacts, { recursive:true });
 const profile = await mkdtemp(resolve(artifacts, 'browser-profile-'));
 const browser = spawn(browserPath, [
-    '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
+    '--headless=new', '--disable-extensions', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
     '--remote-debugging-port=0', '--remote-allow-origins=*',
     '--user-data-dir=' + profile, 'about:blank',
 ], { windowsHide:true, stdio:'ignore' });
@@ -166,8 +180,12 @@ try {
     await send('Runtime.enable');
     await send('Page.enable');
     await send('Emulation.setDeviceMetricsOverride', { width:tauri ? 393 : 920, height:tauri ? 851 : 1050, deviceScaleFactor:1, mobile:tauri });
-    if (tauri) await send('Emulation.setUserAgentOverride', { userAgent:'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36' });
+    if (tauri) {
+        await send('Emulation.setUserAgentOverride', { userAgent:'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36' });
+        await send('Emulation.setTouchEmulationEnabled', { enabled:true, maxTouchPoints:1 });
+    }
     await send('Page.navigate', { url:'http://127.0.0.1:' + port + '/tests/browser.html' + (tauri ? '?tauri=1' : '') });
+    await send('Page.bringToFront');
     let result;
     for (let attempt = 0; attempt < 800; attempt++) {
         const evaluation = await send('Runtime.evaluate', { expression:'globalThis.__testResult', returnByValue:true });
@@ -177,6 +195,7 @@ try {
     }
     if (!result) throw new Error('Browser tests timed out. Exceptions: ' + exceptions.join('; '));
     if (!result.failures.length) {
+        await send('Page.bringToFront');
         const evaluate = async expression => {
             const response = await send('Runtime.evaluate', { expression, returnByValue:true });
             if (response.exceptionDetails) throw new Error(response.exceptionDetails.text);
@@ -188,31 +207,65 @@ try {
         };
         const mouse = (type, x, y, extra = {}) => send('Input.dispatchMouseEvent', { type, x, y, ...extra });
         await uiCheck('真实点击入口、Escape 关闭及拖动不误开窗口，位置保存在屏幕内', async () => {
-            await evaluate("document.querySelector('#floor-memory').close()");
+            await evaluate("document.querySelector('#world-os').close()");
             await sleep(30);
-            let center = await evaluate("(() => { const r=document.querySelector('#fm-launcher').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()");
+            let center = await evaluate("(() => { const r=document.querySelector('#wo-launcher').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()");
             await mouse('mousePressed', center.x, center.y, { button:'left', clickCount:1 });
             await mouse('mouseReleased', center.x, center.y, { button:'left', clickCount:1 });
-            if (!await evaluate("document.querySelector('#floor-memory').open")) throw new Error('real click did not open window');
+            if (!await evaluate("document.querySelector('#world-os').open")) throw new Error('real click did not open window');
             await send('Input.dispatchKeyEvent', { type:'keyDown', key:'Escape', code:'Escape', windowsVirtualKeyCode:27 });
             await send('Input.dispatchKeyEvent', { type:'keyUp', key:'Escape', code:'Escape', windowsVirtualKeyCode:27 });
             await sleep(30);
-            if (await evaluate("document.querySelector('#floor-memory').open")) throw new Error('Escape did not close window');
+            if (await evaluate("document.querySelector('#world-os').open")) throw new Error('Escape did not close window');
             await mouse('mousePressed', center.x, center.y, { button:'left', buttons:1, clickCount:1 });
             await mouse('mouseMoved', 30, 90, { button:'left', buttons:1 });
             await mouse('mouseReleased', 30, 90, { button:'left', clickCount:1 });
-            const state = await evaluate("(() => { const r=document.querySelector('#fm-launcher').getBoundingClientRect(); return {open:document.querySelector('#floor-memory').open,left:r.left,top:r.top,right:r.right,bottom:r.bottom,saved:localStorage.getItem('floor_summary_memory.launcherPosition')}; })()");
+            const state = await evaluate("(() => { const r=document.querySelector('#wo-launcher').getBoundingClientRect(); return {open:document.querySelector('#world-os').open,left:r.left,top:r.top,right:r.right,bottom:r.bottom,saved:localStorage.getItem('floor_summary_memory.launcherPosition')}; })()");
             if (state.open || !state.saved || state.left < 0 || state.top < 0 || Math.abs(state.top - center.y) < 20) throw new Error('drag opened window or did not persist/move entrance');
         });
         await uiCheck('旋转或缩小屏幕后悬浮入口仍可点击，重新打开保留唯一窗口', async () => {
             await send('Emulation.setDeviceMetricsOverride', { width:tauri ? 851 : 480, height:tauri ? 393 : 650, deviceScaleFactor:1, mobile:tauri });
             await sleep(100);
-            const fits = await evaluate("(() => { const r=document.querySelector('#fm-launcher').getBoundingClientRect(); return r.left>=0 && r.top>=0 && r.right<=innerWidth+1 && r.bottom<=innerHeight+1; })()");
+            const fits = await evaluate("(() => { const r=document.querySelector('#wo-launcher').getBoundingClientRect(); return r.left>=0 && r.top>=0 && r.right<=innerWidth+1 && r.bottom<=innerHeight+1; })()");
             if (!fits) throw new Error('launcher stranded outside resized viewport');
             await send('Emulation.setDeviceMetricsOverride', { width:tauri ? 393 : 920, height:tauri ? 851 : 1050, deviceScaleFactor:1, mobile:tauri });
             await sleep(100);
-            await evaluate("document.querySelector('#fm-launcher').click()");
-            if (!await evaluate("document.querySelector('#floor-memory').open && document.querySelectorAll('#fm-form').length === 1")) throw new Error('window unavailable after resize');
+            await evaluate("document.querySelector('#wo-launcher').click()");
+            if (!await evaluate("document.querySelector('#world-os').open && document.querySelectorAll('#fm-form').length === 1")) throw new Error('window unavailable after resize');
+        });
+        if (tauri) await uiCheck('Android 触摸书本图标进入功能页，左上角返回保留设置，关闭后再次从首页进入', async () => {
+            const tap = async selector => {
+                const point = await evaluate("(() => { const r=document.querySelector(" + JSON.stringify(selector) + ").getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()");
+                await send('Input.dispatchTouchEvent', { type:'touchStart', touchPoints:[{ ...point, id:1, radiusX:1, radiusY:1, force:1 }] });
+                await send('Input.dispatchTouchEvent', { type:'touchEnd', touchPoints:[] });
+                await sleep(50);
+            };
+            await evaluate("document.querySelector('#wo-back').click()");
+            await tap('#wo-open-floor-memory');
+            if (!await evaluate("document.querySelector('#world-os').dataset.page === 'floor-memory'")) throw new Error('touch did not open app');
+            await tap('#wo-back');
+            if (!await evaluate("document.querySelector('#world-os').dataset.page === 'home' && document.querySelector('#world-os').open")) throw new Error('back touch did not return to home');
+            await tap('#wo-window-close');
+            await tap('#wo-launcher');
+            if (!await evaluate("document.querySelector('#world-os').dataset.page === 'home' && document.querySelector('#world-os').open")) throw new Error('touch launcher did not reopen home');
+        });
+        if (tauri) await uiCheck('Android 触摸日历图标、日期标记和输入框上方时间按钮均可操作', async () => {
+            const tap = async selector => {
+                const point = await evaluate("(() => { const r=document.querySelector(" + JSON.stringify(selector) + ").getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()");
+                await send('Input.dispatchTouchEvent', { type:'touchStart', touchPoints:[{ ...point, id:1, radiusX:1, radiusY:1, force:1 }] });
+                await send('Input.dispatchTouchEvent', { type:'touchEnd', touchPoints:[] });
+                await sleep(50);
+            };
+            await tap('#wo-open-calendar');
+            if (!await evaluate("document.querySelector('#world-os').dataset.page === 'calendar'")) throw new Error('touch did not open calendar');
+            await tap('#wo-cal-days [data-day="15"]');
+            if (!await evaluate("document.querySelector('#wo-cal-holiday-panel').open && document.querySelector('#wo-cal-holiday-day').value === '15'")) throw new Error('touch did not select date');
+            await tap('#wo-back');
+            await tap('#wo-window-close');
+            await tap('#wo-calendar-quick');
+            if (!await evaluate("document.querySelector('#wo-calendar-jump').open && document.querySelector('#wo-cal-jump-preview').textContent.includes('团圆节')")) throw new Error('touch did not open time preview');
+            await tap('#wo-cal-jump-close');
+            if (await evaluate("document.querySelector('#wo-calendar-jump').open")) throw new Error('time dialog failed to close');
         });
     }
     await writeFile(resolve(artifacts, artifactPrefix + '-results.json'), JSON.stringify({ ...result, exceptions }, null, 2));
@@ -220,11 +273,16 @@ try {
     for (const failure of result.failures) console.error('FAIL ' + failure);
     if (result.failures.length || exceptions.length) process.exitCode = 1;
     console.log(result.passed.length + ' browser checks passed; ' + result.failures.length + ' failed.');
-    await send('Runtime.evaluate', { expression: "if (!document.querySelector('#floor-memory').open) document.querySelector('#fm-launcher').click(); document.querySelector('.fm-window-body').scrollTop = 0;", returnByValue:true });
+    await send('Runtime.evaluate', { expression: "if (!document.querySelector('#world-os').open) document.querySelector('#wo-launcher').click(); document.querySelector('#wo-back').click(); document.querySelector('.wo-window-body').scrollTop = 0; document.fonts.ready", awaitPromise:true, returnByValue:true });
     await send('Page.bringToFront');
     try {
-        const screenshot = await send('Page.captureScreenshot', { format:'png', captureBeyondViewport:false });
-        await writeFile(resolve(artifacts, artifactPrefix + '-preview.png'), Buffer.from(screenshot.data, 'base64'));
+        for (const view of ['home', 'memory', 'calendar', 'calendar-time']) {
+            if (view === 'memory') await send('Runtime.evaluate', { expression: "document.querySelector('#wo-open-floor-memory').click(); for (const section of document.querySelectorAll('#floor-memory details')) section.open = false; document.querySelector('.wo-window-body').scrollTop = 0;", returnByValue:true });
+            if (view === 'calendar') await send('Runtime.evaluate', { expression: "document.querySelector('#wo-open-calendar').click(); document.querySelector('.wo-window-body').scrollTop = 0;", returnByValue:true });
+            if (view === 'calendar-time') await send('Runtime.evaluate', { expression: "document.querySelector('#world-os').close(); document.querySelector('#wo-calendar-quick').click();", returnByValue:true });
+            const screenshot = await send('Page.captureScreenshot', { format:'png', captureBeyondViewport:false });
+            await writeFile(resolve(artifacts, artifactPrefix + '-' + view + '-preview.png'), Buffer.from(screenshot.data, 'base64'));
+        }
     } catch (error) { console.warn('Screenshot unavailable: ' + error.message); }
 } finally {
     if (socket?.readyState === WebSocket.OPEN) {
