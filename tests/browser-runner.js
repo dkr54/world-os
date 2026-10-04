@@ -23,12 +23,13 @@ const calls = [];
 const modelCalls = [];
 const rerankCalls = [];
 const keywordCalls = [];
+const characterCalls = [];
 const server = createServer(async (request, response) => {
     try {
         const url = new URL(request.url, 'http://localhost');
         if (url.pathname === '/__state') {
             response.writeHead(200, { 'Content-Type':'application/json' });
-            response.end(JSON.stringify({ calls, modelCalls, rerankCalls, keywordCalls }));
+            response.end(JSON.stringify({ calls, modelCalls, rerankCalls, keywordCalls, characterCalls }));
             return;
         }
         if (url.pathname.endsWith('/models')) {
@@ -37,7 +38,7 @@ const server = createServer(async (request, response) => {
             if (url.pathname.startsWith('/slow-models/')) await sleep(1600);
             const ids = url.pathname.startsWith('/empty-models/') ? [] : url.pathname.startsWith('/slow-models/')
                 ? ['stale-model'] : url.pathname.startsWith('/rerank-models/') ? ['test-reranker', 'private-rerank']
-                : url.pathname.startsWith('/keyword/') ? ['small-instruct', 'other-chat'] : ['test-embedding', 'test-embedding-v2', 'private-opaque-id', 'test-embedding'];
+                : url.pathname.startsWith('/character/') ? ['state-small','state-large'] : url.pathname.startsWith('/keyword/') ? ['small-instruct', 'other-chat'] : ['test-embedding', 'test-embedding-v2', 'private-opaque-id', 'test-embedding'];
             response.writeHead(200, { 'Content-Type':'application/json' });
             response.end(JSON.stringify({ data:ids.map(id => ({ id })) }));
             return;
@@ -46,6 +47,17 @@ const server = createServer(async (request, response) => {
             let body = '';
             for await (const chunk of request) body += chunk;
             const parsed = JSON.parse(body);
+            if (url.pathname.startsWith('/character/')) {
+                characterCalls.push({ path:url.pathname,...parsed,authorization:request.headers.authorization });
+                const content = parsed.messages.find(message => message.content.includes('本次角色、当前状态及权限：\n'))?.content ?? '';
+                const raw = content.slice(content.indexOf('\n')+1).split('\n\n生成前的查询文本：')[0];
+                const characters = JSON.parse(raw);
+                const operations = characters.map(character => ({ op:'update',characterId:character.id,path:'affection',value:60 }));
+                operations.push({op:'delete',characterId:characters[0].id,path:'age'});
+                operations.push({op:'execute',characterId:characters[0].id,path:'affection',value:100});
+                response.writeHead(200,{'Content-Type':'application/json'});
+                response.end(JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify({operations})+'}'}}]}));return;
+            }
             keywordCalls.push({ path:url.pathname, ...parsed, authorization:request.headers.authorization });
             if (url.pathname.startsWith('/partial-keywords/') && keywordCalls.filter(call => call.path === url.pathname).length === 2) {
                 response.writeHead(503); response.end('{}'); return;
@@ -267,6 +279,22 @@ try {
             await tap('#wo-cal-jump-close');
             if (await evaluate("document.querySelector('#wo-calendar-jump').open")) throw new Error('time dialog failed to close');
         });
+        if (tauri) await uiCheck('Android 触摸角色、关系、接口、调试与快照入口，底部菜单保持可达', async () => {
+            const tap = async selector => {
+                const point = await evaluate("(() => { const node=document.querySelector(" + JSON.stringify(selector) + "); node.scrollIntoView({block:'nearest'}); const r=node.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()");
+                await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...point,id:1,radiusX:1,radiusY:1,force:1}]});
+                await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]}); await sleep(70);
+            };
+            await evaluate("globalThis.__showCharacterFixture()");
+            await tap('#wo-ch-list .wo-ch-contact');
+            if (!await evaluate("!document.querySelector('[data-ch-view=\"detail\"]').hidden")) throw new Error('contact touch did not open details');
+            for (const name of ['relations','api','debug','list']) {
+                await tap('[data-ch-tab="' + name + '"]');
+                if (!await evaluate("!document.querySelector('[data-ch-view=\"" + name + "\"]').hidden")) throw new Error('tab touch did not switch to '+name);
+            }
+            await tap('#wo-back');await tap('#wo-open-snapshot');
+            if (!await evaluate("document.querySelector('#world-os').dataset.page==='snapshot'")) throw new Error('snapshot touch failed');
+        });
     }
     await writeFile(resolve(artifacts, artifactPrefix + '-results.json'), JSON.stringify({ ...result, exceptions }, null, 2));
     for (const passed of result.passed) console.log('PASS ' + passed);
@@ -276,10 +304,17 @@ try {
     await send('Runtime.evaluate', { expression: "if (!document.querySelector('#world-os').open) document.querySelector('#wo-launcher').click(); document.querySelector('#wo-back').click(); document.querySelector('.wo-window-body').scrollTop = 0; document.fonts.ready", awaitPromise:true, returnByValue:true });
     await send('Page.bringToFront');
     try {
-        for (const view of ['home', 'memory', 'calendar', 'calendar-time']) {
+        for (const view of ['home', 'memory', 'calendar', 'calendar-time', 'characters', 'character-detail', 'relationships', 'character-api', 'character-debug', 'snapshot']) {
             if (view === 'memory') await send('Runtime.evaluate', { expression: "document.querySelector('#wo-open-floor-memory').click(); for (const section of document.querySelectorAll('#floor-memory details')) section.open = false; document.querySelector('.wo-window-body').scrollTop = 0;", returnByValue:true });
             if (view === 'calendar') await send('Runtime.evaluate', { expression: "document.querySelector('#wo-open-calendar').click(); document.querySelector('.wo-window-body').scrollTop = 0;", returnByValue:true });
             if (view === 'calendar-time') await send('Runtime.evaluate', { expression: "document.querySelector('#world-os').close(); document.querySelector('#wo-calendar-quick').click();", returnByValue:true });
+            if (view === 'characters') await send('Runtime.evaluate', { expression:"if(document.querySelector('#wo-calendar-jump').open)document.querySelector('#wo-calendar-jump').close();globalThis.__showCharacterFixture();",returnByValue:true });
+            if (view === 'character-detail') await send('Runtime.evaluate',{expression:"document.querySelector('#wo-ch-list .wo-ch-contact').click();document.querySelector('.wo-window-body').scrollTop=0;",returnByValue:true});
+            if (view === 'relationships') await send('Runtime.evaluate',{expression:"document.querySelector('[data-ch-tab=\"relations\"]').click();",returnByValue:true});
+            if (view === 'character-api') await send('Runtime.evaluate',{expression:"document.querySelector('[data-ch-tab=\"api\"]').click();",returnByValue:true});
+            if (view === 'character-debug') await send('Runtime.evaluate',{expression:"document.querySelector('[data-ch-tab=\"debug\"]').click();",returnByValue:true});
+            if (view === 'snapshot') await send('Runtime.evaluate',{expression:"document.querySelector('#wo-open-snapshot').click();",returnByValue:true});
+            await sleep(40);
             const screenshot = await send('Page.captureScreenshot', { format:'png', captureBeyondViewport:false });
             await writeFile(resolve(artifacts, artifactPrefix + '-' + view + '-preview.png'), Buffer.from(screenshot.data, 'base64'));
         }

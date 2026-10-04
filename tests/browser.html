@@ -38,7 +38,9 @@ async function waitFor(predicate, label, timeout = 7000) {
     throw new Error('Timeout: ' + label);
 }
 const listeners = new Map();
-const eventNames = ['WORLDINFO_ENTRIES_LOADED','WORLDINFO_SCAN_DONE','CHAT_CHANGED','CHAT_LOADED','MESSAGE_RECEIVED','MESSAGE_SENT','MESSAGE_UPDATED','MESSAGE_EDITED','MESSAGE_DELETED','MESSAGE_SWIPED','MESSAGE_SWIPE_DELETED','GENERATION_STARTED','GENERATION_ENDED','GENERATION_STOPPED','CHARACTER_MESSAGE_RENDERED'];
+const registeredMacros = new Map();
+globalThis.__worldMacros = registeredMacros;
+const eventNames = ['CHAT_COMPLETION_PROMPT_READY','GENERATE_AFTER_DATA','GENERATE_AFTER_COMBINE_PROMPTS','WORLDINFO_ENTRIES_LOADED','WORLDINFO_SCAN_DONE','CHAT_CHANGED','CHAT_LOADED','MESSAGE_RECEIVED','MESSAGE_SENT','MESSAGE_UPDATED','MESSAGE_EDITED','MESSAGE_DELETED','MESSAGE_SWIPED','MESSAGE_SWIPE_DELETED','GENERATION_STARTED','GENERATION_ENDED','GENERATION_STOPPED','CHARACTER_MESSAGE_RENDERED'];
 const eventSource = { on: (name, callback) => {
     if (!listeners.has(name)) listeners.set(name, []);
     listeners.get(name).push(callback);
@@ -59,6 +61,7 @@ let ctx = {
     eventSource, eventTypes:Object.fromEntries(eventNames.map(name => [name,name])),
     saveMetadata:async () => { saves++; },
     saveSettingsDebounced:() => {},
+    registerMacro:(name,handler) => registeredMacros.set(name,handler),
 };
 globalThis.SillyTavern = { getContext:() => ctx };
 const workerUrls = [];
@@ -131,7 +134,7 @@ try {
         const panel = document.querySelector('#world-os');
         const launcher = document.querySelector('#wo-launcher');
         assert(host.querySelectorAll('input,button,select,textarea').length === 1, 'extension page still contains full settings');
-        assert(host.querySelector('#fm-enabled')?.type === 'checkbox', 'enable switch missing');
+        assert(host.querySelector('#wo-enabled')?.type === 'checkbox', 'enable switch missing');
         assert(!host.contains(panel) && panel.parentElement === document.body, 'window still nested in extension drawer');
         assert(!panel.open && launcher.getBoundingClientRect().width > 0, 'initial window/launcher visibility wrong');
         assert(launcher.textContent === 'world os', 'old launcher branding remains');
@@ -940,6 +943,8 @@ try {
             await waitFor(() => document.querySelector('#fm-preview-output').textContent.includes('中间总结 M：第 1 楼'), 'tauri preview');
         });
     }
+    const { runCharacterChecks } = await import('/tests/characters-browser.js');
+    await runCharacterChecks({ check, assert, waitFor, delay, emit, getContext:()=>ctx, setContext:value=>{ctx=value;}, tauri, macros:registeredMacros });
     const { runCalendarChecks } = await import('/tests/calendar-browser.js');
     await runCalendarChecks({ check, assert, waitFor, delay, emit, getContext:()=>ctx, setContext:value=>{ctx=value;}, tauri, testLayout, layoutListeners });
     globalThis.__testResult = { passed:checks, failures };

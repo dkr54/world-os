@@ -1,7 +1,7 @@
 import { MODULE_KEY } from './core.js';
 
 /** World OS shell: retain live app pages, drafts, and the native mobile dialog contract. */
-export function mountFloatingWindow(panel, { host, enabled, onEnabledChange }) {
+export function mountFloatingWindow(panel, { host, enabled, onEnabledChange, masterEnabled = true, onMasterChange = () => {} }) {
     const launcher = document.createElement('button');
     launcher.id = 'wo-launcher';
     launcher.type = 'button';
@@ -20,8 +20,8 @@ export function mountFloatingWindow(panel, { host, enabled, onEnabledChange }) {
     label.className = 'checkbox_label';
     const toggle = document.createElement('input');
     toggle.type = 'checkbox';
-    toggle.id = 'fm-enabled';
-    label.append(toggle, document.createTextNode('world os · 启用楼层记忆'));
+    toggle.id = 'wo-enabled';
+    label.append(toggle, document.createTextNode('启用 world os'));
     compact.append(label);
     host.append(compact);
     document.body.append(launcher, panel);
@@ -31,15 +31,25 @@ export function mountFloatingWindow(panel, { host, enabled, onEnabledChange }) {
     launcher.dataset.ttMobileSurface = 'free-window';
 
     const insideToggle = panel.querySelector('[name="enabled"]');
+    insideToggle.id = 'fm-enabled';
+    const masterToggle = panel.querySelector('#wo-master-enabled');
+    const setWorldEnabled = value => {
+        toggle.checked = masterToggle.checked = Boolean(value);
+        panel.querySelector('#wo-master-status').textContent = value ? '已启用' : '已关闭：停止上下文注入、时间推进和自动状态更新。';
+    };
+    for (const input of [toggle, masterToggle]) input.addEventListener('change', () => {
+        setWorldEnabled(input.checked); onMasterChange(input.checked);
+    });
+    setWorldEnabled(masterEnabled);
     const closeButton = panel.querySelector('#wo-window-close');
     const scroll = panel.querySelector('.wo-window-body');
     const setEnabled = value => {
-        toggle.checked = insideToggle.checked = Boolean(value);
+        insideToggle.checked = Boolean(value);
         const state = value ? '已启用' : '已关闭';
         panel.querySelector('#fm-enabled-state').textContent = state;
         panel.querySelector('#wo-open-floor-memory').setAttribute('aria-label', '楼层记忆（' + state + '）');
     };
-    for (const input of [toggle, insideToggle]) {
+    for (const input of [insideToggle]) {
         input.addEventListener('change', () => {
             setEnabled(input.checked);
             onEnabledChange(input.checked);
@@ -181,5 +191,5 @@ export function mountFloatingWindow(panel, { host, enabled, onEnabledChange }) {
             .catch(error => console.warn('[world os] Layout subscription:', error.message));
     } catch (error) { console.warn('[world os] Layout subscription:', error.message); }
     refreshLayout();
-    return { setEnabled, openApp(name) { if (!panel.open) launcher.click(); showPage(name); } };
+    return { setEnabled, setWorldEnabled, openApp(name) { if (!panel.open) launcher.click(); showPage(name); } };
 }

@@ -97,7 +97,7 @@ test('final scan appends holiday settings to World Info After without changing e
     [...args.activated.entries.values()].sort((a,b)=>b.order-a.order).forEach(entry=>(entry.position===0?before:after).unshift(entry.content));
     assert.deepEqual(before,['世界书前']);
     assert.equal(after.slice(0,2).join('\n'),'后部一\n后部二');
-    assert.ok(after.at(-1).endsWith('灯火节\n全城点灯，街道举办夜市。'));
+    assert.ok(after.at(-1).endsWith('<灯火节>\n全城点灯，街道举办夜市。\n</灯火节>\n\n'));
     assert.equal(JSON.stringify(entries),original);assert.equal(JSON.stringify(args.budget),budget);
     assert.equal(args.activated.text,'已有扫描内容');
 });
@@ -127,5 +127,5 @@ test('non-holidays, disabled calendars, and blank holiday descriptions add no pr
 test('macro expansion is delegated to the host for the holiday block', () => {
     const {snapshot}=state(definition({holidays:[holiday({prompt:'欢迎 {{user}}'})]}));const {args}=scan(snapshot);
     finishCalendarScan(args,snapshot,text=>text.replace('{{user}}','旅行者'));
-    assert.ok([...args.activated.entries.values()][0].content.endsWith('欢迎 旅行者'));
+    assert.ok([...args.activated.entries.values()][0].content.endsWith('欢迎 旅行者\n</灯火节>\n\n'));
 });

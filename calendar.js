@@ -1,3 +1,4 @@
+import { worldEnabled, WORLD_EVENT } from './world-state.js';
 import {
     CALENDAR_KEY, DEFAULT_CALENDAR, calendarOwner, calendarChat, validateCalendar, validateDate,
     parseMonthDays, readCalendar, rawChatDate, holidaysOn, advanceDate, formatDate,
@@ -61,7 +62,7 @@ export function mountCalendar(root, { getContext, openApp }) {
     function syncControls() {
         const ctx = getContext();
         let usable = Boolean(calendarChat(ctx)) && !busy && !generating;
-        try { const calendar = readCalendar(ctx); activeDate(calendar); usable &&= calendar.enabled; } catch { usable = false; }
+        try { const calendar = readCalendar(ctx); activeDate(calendar); usable &&= calendar.enabled && worldEnabled(ctx); } catch { usable = false; }
         quick.disabled = find('advance-open').disabled = !usable;
         jump('apply').disabled = !usable;
         find('controls').disabled = busy || !calendarOwner(ctx);
@@ -226,7 +227,7 @@ export function mountCalendar(root, { getContext, openApp }) {
         refresh();
         const ctx = getContext(), calendar = readCalendar(ctx);
         if (!calendarChat(ctx)) { notify('请先打开一段聊天。', 'warning'); return; }
-        if (!calendar.enabled || generating) return;
+        if (!worldEnabled(getContext()) || !calendar.enabled || generating) return;
         try {
             const date = activeDate(calendar);
             jumpSnapshot = { scope: calendarChat(ctx), revision: JSON.stringify([calendar, date]), calendar, date };
@@ -258,7 +259,7 @@ export function mountCalendar(root, { getContext, openApp }) {
         action(async () => {
             const ctx = getContext(), calendar = readCalendar(ctx), date = activeDate(calendar);
             if (!jumpSnapshot || calendarChat(ctx) !== jumpSnapshot.scope || JSON.stringify([calendar, date]) !== jumpSnapshot.revision) throw new Error('聊天、日期或日历规则已变化，请重新打开时间窗口。');
-            if (!calendar.enabled || generating) throw new Error('当前无法推进时间，请等待生成结束并确认日历已启用。');
+            if (!worldEnabled(getContext()) || !calendar.enabled || generating) throw new Error('当前无法推进时间，请等待生成结束并确认日历已启用。');
             const days = jump('days').value, next = advanceDate(date, days, calendar.months);
             const isCurrent = await saveDate(next, advancePrompt(calendar, next, days));
             if (!isCurrent) return;
@@ -333,7 +334,7 @@ export function mountCalendar(root, { getContext, openApp }) {
     for (const name of ['GENERATION_STARTED', 'GENERATION_ENDED', 'GENERATION_STOPPED']) if (eventTypes[name]) eventSource.on(eventTypes[name], () => {
         generating = name === 'GENERATION_STARTED'; syncControls();
     });
-    const snapshot = () => { try { return calendarSnapshot(getContext()); } catch { return null; } };
+    const snapshot = () => { try { return worldEnabled(getContext()) ? calendarSnapshot(getContext()) : null; } catch { return null; } };
     if (eventTypes.WORLDINFO_ENTRIES_LOADED && eventTypes.WORLDINFO_SCAN_DONE) {
         eventSource.on(eventTypes.WORLDINFO_ENTRIES_LOADED, data => addCalendarScanSeed(data, snapshot()));
         eventSource.on(eventTypes.WORLDINFO_SCAN_DONE, data => finishCalendarScan(data, snapshot(), value => {
@@ -345,6 +346,9 @@ export function mountCalendar(root, { getContext, openApp }) {
         warning.textContent = '宿主未提供节日注入所需的世界书事件，请更新 SillyTavern 或 TauriTavern。';
         page.prepend(warning);
     }
+    document.addEventListener(WORLD_EVENT, () => {
+        jumpSnapshot = null; if (popup.open) popup.close(); refresh(true);
+    });
     refresh(true);
     return { refresh };
 }

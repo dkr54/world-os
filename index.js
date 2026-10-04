@@ -7,6 +7,9 @@ import {
 import { RegexRunner } from './regex-runner.js';
 import { mountFloatingWindow } from './floating-window.js';
 import { mountCalendar } from './calendar.js';
+import { mountCharacters } from './characters.js';
+import { mountSnapshots } from './snapshots.js';
+import { WORLD_KEY, WORLD_EVENT, worldEnabled, announceWorldChange } from './world-state.js';
 import { waitForHostReady, runtimeLabel, tauriPromptSource, downloadMemory } from './host-runtime.js';
 import {
     VectorCache, EmbeddingIndex, requestEmbeddings, embeddingUrl, requestModels, modelsUrl,
@@ -34,6 +37,7 @@ const pendingAutoMessages = new Set();
 let hostGenerating = false;
 let root;
 let floatingWindow;
+let characterApp;
 let recordsPage = 0;
 let revision = 0;
 let syncQueue = Promise.resolve();
@@ -208,6 +212,8 @@ async function planInjection(prompt, type, signal) {
 globalThis.floorMemoryInterceptor = async (prompt, _contextSize, abort, type = 'normal') => {
     let job;
     try {
+        if (!worldEnabled(context())) return;
+        characterApp?.engine.prepare(type);
         if (!settings().enabled || ['quiet', 'impersonate'].includes(type) || !scopeOf()) return;
         job = beginJob();
         activeGeneration = true;
@@ -566,7 +572,7 @@ async function runAutomaticKeywords(next, config, signal) {
 function scheduleSync() {
     clearTimeout(syncTimer);
     syncTimer = setTimeout(() => {
-        if (!settings().enabled || !scopeOf() || context().streamingProcessor?.isFinished === false) return;
+        if (!worldEnabled(context()) || !settings().enabled || !scopeOf() || context().streamingProcessor?.isFinished === false) return;
         // A delayed background scan must not cancel a foreground preview/index job.
         if (activeGeneration || hostGenerating || jobs.size) { scheduleSync(); return; }
         runAction(async signal => {
@@ -590,7 +596,12 @@ async function initialize() {
     if (!host) throw new Error('找不到 SillyTavern 扩展设置区域。');
     if (document.querySelector('#world-os')) return;
     floatingWindow = mountFloatingWindow(root, {
-        host, enabled: settings().enabled,
+        host, enabled: settings().enabled, masterEnabled: worldEnabled(ctx),
+        onMasterChange(enabled) {
+            const current = context();
+            current.extensionSettings[WORLD_KEY] = { ...current.extensionSettings[WORLD_KEY], schema:1, enabled };
+            current.saveSettingsDebounced(); announceWorldChange('master');
+        },
         onEnabledChange(enabled) {
             invalidate();
             const current = context();
@@ -602,6 +613,14 @@ async function initialize() {
         },
     });
     mountCalendar(root, { getContext: context, openApp: floatingWindow.openApp });
+    characterApp = mountCharacters(root, { getContext: context });
+    mountSnapshots(root, { getContext: context });
+    document.addEventListener(WORLD_EVENT, event => {
+        invalidate(); pendingAutoMessages.clear(); cancelModelLoad();
+        floatingWindow.setWorldEnabled(worldEnabled(context()));
+        if (event.detail?.kind === 'restore') { fillForm(); renderRecords(true); root.querySelector('#fm-preview-output').textContent = ''; }
+        if (event.detail?.kind !== 'before-restore') scheduleSync();
+    });
     fillForm();
     root.querySelector('#fm-runtime').textContent = '运行环境：' + runtimeLabel();
     for (const picker of [
@@ -737,7 +756,7 @@ async function initialize() {
             if (name === 'GENERATION_STARTED') hostGenerating = true;
             if (name === 'GENERATION_ENDED' || name === 'GENERATION_STOPPED') hostGenerating = false;
             if (name === 'GENERATION_STOPPED') pendingAutoMessages.clear();
-            if (name === 'MESSAGE_RECEIVED' && settings().enabled && settings().aiKeywordAuto) {
+            if (name === 'MESSAGE_RECEIVED' && worldEnabled(context()) && settings().enabled && settings().aiKeywordAuto) {
                 const message = Number.isInteger(messageIndex) ? context().chat[messageIndex] : context().chat.at(-1);
                 if (message && message.role !== 'tool' && !message.is_user && !message.is_system
                     && !(Array.isArray(message.tool_calls) && message.tool_calls.length)) pendingAutoMessages.add(message);

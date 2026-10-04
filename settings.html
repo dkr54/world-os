@@ -8,6 +8,8 @@
   <div class="wo-window-body">
     <section id="wo-home" class="wo-home" data-wo-page="home" data-wo-title="world os" aria-label="world os 功能选择">
       <p class="wo-home-description">世界操作系统</p>
+      <label class="checkbox_label wo-master"><input id="wo-master-enabled" type="checkbox" checked>启用 world os</label>
+      <p id="wo-master-status" class="fm-hint"></p>
       <p class="wo-section-label">内置应用</p>
       <nav class="wo-app-grid" aria-label="内置功能">
         <button type="button" id="wo-open-floor-memory" class="wo-app" data-wo-app="floor-memory" aria-controls="floor-memory">
@@ -17,6 +19,12 @@
         <button type="button" id="wo-open-calendar" class="wo-app" data-wo-app="calendar" aria-controls="wo-calendar">
           <span class="wo-app-icon wo-calendar-icon"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i></span>
           <span class="wo-app-label">日历</span>
+        </button>
+        <button type="button" id="wo-open-characters" class="wo-app" data-wo-app="characters" aria-controls="wo-characters">
+          <span class="wo-app-icon wo-characters-icon"><i class="fa-solid fa-address-book" aria-hidden="true"></i></span><span class="wo-app-label">角色目录</span>
+        </button>
+        <button type="button" id="wo-open-snapshot" class="wo-app" data-wo-app="snapshot" aria-controls="wo-snapshot">
+          <span class="wo-app-icon wo-snapshot-icon"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></span><span class="wo-app-label">状态快照</span>
         </button>
       </nav>
     </section>
@@ -253,6 +261,101 @@
           <div id="wo-cal-holidays"></div>
         </details>
       </fieldset>
+    </section>
+
+    <section id="wo-characters" class="wo-characters floor-memory" data-wo-page="characters" data-wo-title="角色目录" hidden>
+      <p id="wo-ch-status" class="fm-status" role="status" aria-live="polite"></p>
+      <div class="wo-ch-view" data-ch-view="list">
+        <div class="wo-ch-heading"><div><h3>角色</h3><p id="wo-ch-count" class="fm-hint"></p></div><button type="button" id="wo-ch-add" class="menu_button"><i class="fa-solid fa-user-plus" aria-hidden="true"></i> 新建角色</button></div>
+        <label class="wo-ch-search"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input id="wo-ch-search" class="text_pole" placeholder="搜索角色姓名或关键词" aria-label="搜索角色"></label>
+        <div id="wo-ch-list" class="wo-ch-list"></div>
+        <p class="fm-hint">目录跟随当前角色卡。中文按拼音顺序排列，可在详情中填写排序名来调整多音字。聊天状态独立保存。</p>
+      </div>
+      <div class="wo-ch-view" data-ch-view="detail" hidden>
+        <button type="button" id="wo-ch-list-back" class="menu_button"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i> 角色列表</button>
+        <div class="wo-ch-profile"><div id="wo-ch-avatar-preview" class="wo-ch-avatar wo-ch-avatar-large"></div><div><h3 id="wo-ch-detail-name">新角色</h3><p id="wo-ch-stage-current" class="fm-hint"></p></div></div>
+        <form id="wo-ch-definition-form">
+          <div class="fm-grid fm-grid-two"><label>角色名<input id="wo-ch-name" class="text_pole" maxlength="100" required></label><label>排序名（可选，拼音或英文）<input id="wo-ch-sort" class="text_pole" placeholder="例如 shilijiaosejia"></label></div>
+          <label class="checkbox_label"><input id="wo-ch-enabled" type="checkbox" checked>参与关键词匹配</label>
+          <label>触发关键词<input id="wo-ch-keywords" class="text_pole" placeholder="示例角色甲,角色甲"></label>
+          <p class="fm-hint">英文逗号分隔；中文逗号视为关键词的一部分。留空不匹配。查询直接使用最新两条用户或 AI 消息。</p>
+          <details><summary>角色图片</summary><label>图片网址<input id="wo-ch-avatar" class="text_pole" placeholder="https://…"></label><label>或从手机选择图片<input id="wo-ch-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label><p class="fm-hint">上传图片会缩小后保存，快照也会包含上传头像。</p><button id="wo-ch-avatar-clear" type="button" class="menu_button">移除图片</button></details>
+          <label>基础设定<textarea id="wo-ch-description" class="text_pole" rows="5" placeholder="年龄：{{age}}；身高：{{heigh}}；与苏岚的关系：{{relationship.苏岚}}"></textarea></label>
+          <details><summary>分阶段设定</summary>
+            <p class="fm-hint">基础设定始终保留。每阶段的所有条件都满足才可选；多个阶段满足时，采用列表中最靠后的一个。空条件可作为默认阶段。这里只把选中阶段发送给模型，所有阶段都可在此编辑。</p>
+            <div id="wo-ch-stages"></div><button id="wo-ch-add-stage" type="button" class="menu_button">＋ 添加阶段</button>
+          </details>
+          <details><summary>基础状态与 AI 修改权限</summary>
+            <p class="fm-hint">基础状态供新聊天使用；修改后不会覆盖已有聊天状态。状态为 JSON 对象，字段名用英文或中文均可；不要在普通字段名中使用点号。关系用 relationship 对象数组。</p>
+            <label>基础状态 JSON<textarea id="wo-ch-base-state" class="text_pole fm-code" rows="7" spellcheck="false">{}</textarea></label>
+            <button id="wo-ch-permissions-from-state" type="button" class="menu_button">列出基础状态的权限</button>
+            <p class="fm-hint">没有单独配置的已有字段仅允许 update。add 需要字段不存在，delete 需要字段存在。对象须修改具体子字段，不能整体覆盖。relationship.* 可授权关系项的新增或删除。</p>
+            <div id="wo-ch-policies"></div><button id="wo-ch-add-policy" type="button" class="menu_button">＋ 添加字段权限</button>
+          </details>
+          <div class="fm-actions"><button id="wo-ch-save" class="menu_button" type="submit">保存角色设定</button><button id="wo-ch-delete" class="menu_button" type="button">删除角色</button></div>
+        </form>
+        <details><summary>当前聊天的角色状态</summary>
+          <form id="wo-ch-state-form"><label>当前状态 JSON<textarea id="wo-ch-current-state" class="text_pole fm-code" rows="7" spellcheck="false"></textarea></label><div class="fm-actions"><button type="submit" class="menu_button">保存当前状态</button><button type="button" id="wo-ch-reset-state" class="menu_button">恢复此角色的基础状态</button></div></form>
+          <p class="fm-hint">用户手动编辑不受 AI 权限限制。这里只影响当前聊天。</p>
+          <label>给状态模型的更新要求<textarea id="wo-ch-manual-requirements" class="text_pole" rows="3" placeholder="例如：根据刚才的事件，记录她对苏岚的态度变化。"></textarea></label>
+          <button type="button" id="wo-ch-manual-update" class="menu_button">AI 更新此角色状态</button>
+        </details>
+        <details><summary>当前阶段与宏替换预览</summary><pre id="wo-ch-preview" class="fm-output"></pre></details>
+      </div>
+      <div class="wo-ch-view" data-ch-view="relations" hidden>
+        <h3>角色关系</h3><p class="fm-hint">箭头从当前角色指向关系对象。点选角色后可查看详情；下方列出完整描述。</p>
+        <div id="wo-ch-graph" class="wo-ch-graph" aria-label="角色关系有向图"></div><div id="wo-ch-relations"></div>
+      </div>
+      <div class="wo-ch-view" data-ch-view="api" hidden>
+        <h3>状态模型</h3><p class="fm-hint">独立使用兼容 OpenAI 的聊天接口。填写地址和密钥后会拉取模型列表，也可手动填写模型名。</p>
+        <form id="wo-ch-api-form">
+          <label>API 地址<input name="endpoint" class="text_pole" placeholder="https://api.siliconflow.cn/v1" autocomplete="off"></label>
+          <label>API Key<input name="apiKey" type="password" class="text_pole" autocomplete="new-password"></label>
+          <label class="checkbox_label"><input name="rememberKey" type="checkbox">保存密钥到宿主设置（否则仅本次会话）</label>
+          <div class="fm-actions"><button id="wo-ch-models" type="button" class="menu_button">拉取模型列表</button><span id="wo-ch-model-status" class="fm-hint" role="status"></span></div>
+          <label>选择模型<select id="wo-ch-model-select" class="text_pole"><option value="">先拉取模型列表</option></select></label>
+          <label>模型名称<input name="model" class="text_pole" placeholder="支持手动填写"></label>
+          <label class="checkbox_label"><input name="auto" type="checkbox">每次真实 AI 回复后，自动更新本轮实际调用的角色</label>
+          <div class="fm-grid fm-grid-two">
+            <label>温度 temperature<input name="temperature" class="text_pole" type="number" min="0" max="2" step="0.05"></label><label>top_p<input name="topP" class="text_pole" type="number" min="0" max="1" step="0.05"></label>
+            <label>最大输出 tokens<input name="maxTokens" class="text_pole" type="number" min="1" max="100000"></label><label>超时（秒）<input name="timeoutSeconds" class="text_pole" type="number" min="5" max="600"></label>
+          </div>
+          <label>模型思考<select name="thinking" class="text_pole"><option value="auto">自动（硅基流动 Qwen3-8B 关闭思考）</option><option value="off">关闭思考</option><option value="on">开启思考</option></select></label>
+          <label class="checkbox_label"><input name="jsonMode" type="checkbox">请求 JSON 格式（接口需支持）</label>
+          <details><summary>状态更新预设与附加参数</summary>
+            <p class="fm-hint">支持 {{characters}}、{{query}}、{{reply}}、{{requirements}}。每条消息可设置 role；程序会另行约束返回结构并检查每一条修改权限。</p>
+            <div id="wo-ch-prompts"></div><div class="fm-actions"><button id="wo-ch-add-prompt" class="menu_button" type="button">＋ 添加消息</button><button id="wo-ch-reset-prompts" class="menu_button" type="button">恢复默认预设</button></div>
+            <label>附加请求参数 JSON<textarea name="extraBody" class="text_pole fm-code" rows="4" spellcheck="false"></textarea></label>
+          </details>
+          <div class="fm-actions"><button type="submit" class="menu_button">保存接口与预设</button><button id="wo-ch-test-api" type="button" class="menu_button">测试接口</button><button id="wo-ch-cancel" type="button" class="menu_button">取消请求</button></div>
+        </form>
+      </div>
+      <div class="wo-ch-view" data-ch-view="debug" hidden>
+        <h3>本轮调试</h3><p class="fm-hint">在聊天预设中启用一个包含 {{character}} 的条目。这里显示实际进入最终上下文的角色，以及本轮状态修改前后的差异。</p>
+        <div class="fm-actions"><button id="wo-ch-debug-refresh" type="button" class="menu_button">刷新</button><button id="wo-ch-copy-macro" type="button" class="menu_button">复制 {{character}}</button></div>
+        <div id="wo-ch-debug"></div>
+      </div>
+      <nav class="wo-ch-nav" aria-label="角色目录导航">
+        <button type="button" class="menu_button" data-ch-tab="list" aria-current="page"><i class="fa-solid fa-address-book" aria-hidden="true"></i><span>角色</span></button>
+        <button type="button" class="menu_button" data-ch-tab="relations"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i><span>关系</span></button>
+        <button type="button" class="menu_button" data-ch-tab="api"><i class="fa-solid fa-sliders" aria-hidden="true"></i><span>接口</span></button>
+        <button type="button" class="menu_button" data-ch-tab="debug"><i class="fa-solid fa-bug" aria-hidden="true"></i><span>调试</span></button>
+      </nav>
+    </section>
+    <section id="wo-snapshot" class="wo-snapshot floor-memory" data-wo-page="snapshot" data-wo-title="状态快照" hidden>
+      <h3>保存世界的当前状态</h3>
+      <p class="fm-hint">快照包含 world os 设置、所有已配置角色卡的日历与角色目录，以及当前聊天的日期、角色状态和楼层记忆。不包含聊天原文、其他聊天的状态或可重建的向量缓存。</p>
+      <p id="wo-snapshot-scope" class="fm-hint"></p>
+      <label class="checkbox_label"><input id="wo-snapshot-keys" type="checkbox">同时包含已保存的 API 密钥（文件为明文，请妥善保管）</label>
+      <button id="wo-snapshot-export" type="button" class="menu_button"><i class="fa-solid fa-download" aria-hidden="true"></i> 导出当前快照</button>
+      <details><summary>从快照恢复</summary>
+        <label>选择快照文件<input id="wo-snapshot-file" type="file" accept=".json,application/json"></label>
+        <pre id="wo-snapshot-preview" class="fm-output"></pre>
+        <p class="fm-hint">恢复会覆盖快照中的插件设置与当前聊天状态。不会改动聊天原文或其他插件数据。未导出的密钥会保留本机现有值。</p>
+        <label class="checkbox_label"><input id="wo-snapshot-other-chat" type="checkbox">允许将此快照恢复到另一个聊天（角色卡必须相同）</label>
+        <button id="wo-snapshot-restore" type="button" class="menu_button" disabled>恢复所选快照</button>
+      </details>
+      <p id="wo-snapshot-status" class="fm-status" role="status" aria-live="polite"></p>
     </section>
   </div>
 </dialog>

@@ -86,7 +86,7 @@ export function prependPrompt(prefix, original) {
 export function holidayPrompt(calendar, date) {
     const holidays = holidaysOn(calendar, date).filter(item => item.prompt.trim());
     if (!calendar.enabled || !holidays.length) return '';
-    return '[日历 · ' + formatDate(calendar, date) + ']\n' + holidays.map(item => item.name + '\n' + item.prompt).join('\n\n');
+    return '\n\n' + holidays.map(item => '<' + item.name + '>\n' + item.prompt + '\n</' + item.name + '>').join('\n\n') + '\n\n';
 }
 export function calendarSnapshot(ctx) {
     const scope = calendarChat(ctx);
