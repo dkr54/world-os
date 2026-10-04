@@ -5,6 +5,7 @@ import {
     snapshotChat, chatFingerprint, replacePrompt,
 } from './core.js';
 import { RegexRunner } from './regex-runner.js';
+import { mountFloatingWindow } from './floating-window.js';
 import { waitForHostReady, runtimeLabel, tauriPromptSource, downloadMemory } from './host-runtime.js';
 import {
     VectorCache, EmbeddingIndex, requestEmbeddings, embeddingUrl, requestModels, modelsUrl,
@@ -31,6 +32,7 @@ const modelPickers = [];
 const pendingAutoMessages = new Set();
 let hostGenerating = false;
 let root;
+let floatingWindow;
 let recordsPage = 0;
 let revision = 0;
 let syncQueue = Promise.resolve();
@@ -586,7 +588,18 @@ async function initialize() {
     const host = document.querySelector('#extensions_settings2') ?? document.querySelector('#extensions_settings');
     if (!host) throw new Error('找不到 SillyTavern 扩展设置区域。');
     if (document.querySelector('#floor-memory')) return;
-    host.append(root);
+    floatingWindow = mountFloatingWindow(root, {
+        host, enabled: settings().enabled,
+        onEnabledChange(enabled) {
+            invalidate();
+            const current = context();
+            current.extensionSettings[MODULE_KEY] = { ...current.extensionSettings[MODULE_KEY], enabled };
+            if (!enabled) pendingAutoMessages.clear();
+            current.saveSettingsDebounced();
+            status(enabled ? '楼层记忆已启用。' : '楼层记忆已关闭。');
+            scheduleSync();
+        },
+    });
     fillForm();
     root.querySelector('#fm-runtime').textContent = '运行环境：' + runtimeLabel();
     for (const picker of [
@@ -613,6 +626,7 @@ async function initialize() {
             if (!next.aiKeywordRememberKey) next.aiKeywordApiKey = '';
             if (!next.aiKeywordAuto) pendingAutoMessages.clear();
             context().extensionSettings[MODULE_KEY] = next;
+            floatingWindow.setEnabled(next.enabled);
             context().saveSettingsDebounced();
             status('设置已保存。' + (next.enabled ? '楼层记忆已启用。' : '楼层记忆已关闭。'));
             scheduleSync();
@@ -739,7 +753,7 @@ async function initialize() {
     }
     renderRecords();
     scheduleSync();
-    status(runtimeLabel() + ' 准备就绪。' + (settings().enabled ? '楼层记忆已启用。' : '设置好正则与楼层范围后，勾选启用并保存。'));
+    status(runtimeLabel() + ' 准备就绪。' + (settings().enabled ? '楼层记忆已启用。' : '配置正则与楼层范围并保存后，打开“启用楼层记忆”开关。'));
 }
 
 const ready = document.readyState === 'loading'

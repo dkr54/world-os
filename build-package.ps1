@@ -3,7 +3,7 @@ $projectRoot = [System.IO.Path]::GetFullPath($PSScriptRoot)
 $version = (Get-Content -LiteralPath (Join-Path $projectRoot 'manifest.json') -Raw | ConvertFrom-Json).version
 if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Unexpected package version.' }
 $files = @(
-    'manifest.json', 'index.js', 'core.js', 'host-runtime.js', 'embeddings.js',
+    'manifest.json', 'index.js', 'core.js', 'host-runtime.js', 'floating-window.js', 'embeddings.js',
     'keyword-ai.js', 'keyword-json.js', 'regex-runner.js', 'regex-worker.js',
     'settings.html', 'style.css', 'README.md'
 )

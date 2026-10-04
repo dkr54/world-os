@@ -11,6 +11,7 @@ floor-memory/
 ├── index.js
 ├── core.js
 ├── host-runtime.js
+├── floating-window.js
 ├── embeddings.js
 ├── keyword-ai.js
 ├── keyword-json.js
@@ -62,7 +63,7 @@ git push origin main
 
 1. 运行 `powershell -NoProfile -File ./build-package.ps1`。
 2. 脚本生成并校验两个包：`floor-memory-版本.zip` 和 `floor-memory-tauritavern-版本.zip`。
-3. 在 GitHub 的 **Releases → Draft a new release** 中创建对应版本标签（如 `v0.2.0`），附上说明和两个 ZIP 后发布。
+3. 在 GitHub 的 **Releases → Draft a new release** 中创建对应版本标签（如 `v0.3.0`），附上说明和两个 ZIP 后发布。
 4. 使用 GitHub 链接安装的用户从 `main` 获取更新；Release ZIP 供离线／手动安装使用。
 
 源码上传时保留 `.gitignore`：临时浏览器数据、参考源码、ZIP 和本地环境文件已排除。API Key 由用户在宿主设置中填写。

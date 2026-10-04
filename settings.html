@@ -1,10 +1,10 @@
-<div id="floor-memory" class="floor-memory">
-  <div class="inline-drawer">
-    <div class="inline-drawer-toggle inline-drawer-header">
-      <b>楼层记忆 · Floor Memory</b>
-      <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-    </div>
-    <div class="inline-drawer-content">
+<dialog id="floor-memory" class="floor-memory fm-window" aria-labelledby="fm-window-title">
+  <header class="fm-window-header">
+    <h2 id="fm-window-title">楼层记忆</h2>
+    <span id="fm-enabled-state" class="fm-enabled-state">已关闭</span>
+    <button type="button" id="fm-window-close" class="menu_button" aria-label="关闭楼层记忆" title="关闭窗口" autofocus>×</button>
+  </header>
+  <div class="fm-window-body">
       <p class="fm-intro">把回复中的总结变成长期记忆。每条模型回复及其前面的用户消息算一楼。</p>
       <p id="fm-runtime" class="fm-hint"></p>
         <form id="fm-form">
@@ -42,7 +42,7 @@
           <label class="checkbox_label"><input type="checkbox" name="keywordEnabled">启用关键词召回</label>
           <label>查询最近几条用户消息 D（含中间模型回复）<input class="text_pole" type="number" name="queryFloors" min="0" max="10000" required></label>
           <p class="fm-hint">从最新第 1 条用户消息往上，取到第 D 条用户消息，包含两者之间的全部模型回复。D=2 即“上条用户消息 → 中间模型回复 → 最新用户消息”；D=0 只取尚未得到回复的用户消息。</p>
-          <p class="fm-hint">只匹配下方为每楼手动设置的触发关键词，任意一个词命中即可召回。留空的楼层不参与关键词匹配；关键词结果不足 K 时，它们与其他未命中楼层一起参与向量召回。</p>
+          <p class="fm-hint">匹配每楼已设置的触发关键词（手动或 AI 生成），任意一个词命中即可候选。从最近的命中楼层往前选，最多 K 楼，不按命中词数量排序。满 K 楼后不请求向量或重排；不足时由未命中的旧楼层补足。空关键词不参与关键词匹配。</p>
         </details>
         <details id="fm-embedding-panel">
           <summary>③ 独立 Embedding 接口</summary>
@@ -168,6 +168,5 @@
         <div id="fm-records"></div>
         <div class="fm-actions"><button class="menu_button" type="button" id="fm-prev-page">上一页</button><span id="fm-page"></span><button class="menu_button" type="button" id="fm-next-page">下一页</button></div>
       </details>
-    </div>
   </div>
-</div>
+</dialog>

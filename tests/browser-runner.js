@@ -176,12 +176,51 @@ try {
         await sleep(100);
     }
     if (!result) throw new Error('Browser tests timed out. Exceptions: ' + exceptions.join('; '));
+    if (!result.failures.length) {
+        const evaluate = async expression => {
+            const response = await send('Runtime.evaluate', { expression, returnByValue:true });
+            if (response.exceptionDetails) throw new Error(response.exceptionDetails.text);
+            return response.result?.value;
+        };
+        const uiCheck = async (name, fn) => {
+            try { await fn(); result.passed.push(name); }
+            catch (error) { result.failures.push(name + ': ' + error.message); }
+        };
+        const mouse = (type, x, y, extra = {}) => send('Input.dispatchMouseEvent', { type, x, y, ...extra });
+        await uiCheck('真实点击入口、Escape 关闭及拖动不误开窗口，位置保存在屏幕内', async () => {
+            await evaluate("document.querySelector('#floor-memory').close()");
+            await sleep(30);
+            let center = await evaluate("(() => { const r=document.querySelector('#fm-launcher').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()");
+            await mouse('mousePressed', center.x, center.y, { button:'left', clickCount:1 });
+            await mouse('mouseReleased', center.x, center.y, { button:'left', clickCount:1 });
+            if (!await evaluate("document.querySelector('#floor-memory').open")) throw new Error('real click did not open window');
+            await send('Input.dispatchKeyEvent', { type:'keyDown', key:'Escape', code:'Escape', windowsVirtualKeyCode:27 });
+            await send('Input.dispatchKeyEvent', { type:'keyUp', key:'Escape', code:'Escape', windowsVirtualKeyCode:27 });
+            await sleep(30);
+            if (await evaluate("document.querySelector('#floor-memory').open")) throw new Error('Escape did not close window');
+            await mouse('mousePressed', center.x, center.y, { button:'left', buttons:1, clickCount:1 });
+            await mouse('mouseMoved', 30, 90, { button:'left', buttons:1 });
+            await mouse('mouseReleased', 30, 90, { button:'left', clickCount:1 });
+            const state = await evaluate("(() => { const r=document.querySelector('#fm-launcher').getBoundingClientRect(); return {open:document.querySelector('#floor-memory').open,left:r.left,top:r.top,right:r.right,bottom:r.bottom,saved:localStorage.getItem('floor_summary_memory.launcherPosition')}; })()");
+            if (state.open || !state.saved || state.left < 0 || state.top < 0 || Math.abs(state.top - center.y) < 20) throw new Error('drag opened window or did not persist/move entrance');
+        });
+        await uiCheck('旋转或缩小屏幕后悬浮入口仍可点击，重新打开保留唯一窗口', async () => {
+            await send('Emulation.setDeviceMetricsOverride', { width:tauri ? 851 : 480, height:tauri ? 393 : 650, deviceScaleFactor:1, mobile:tauri });
+            await sleep(100);
+            const fits = await evaluate("(() => { const r=document.querySelector('#fm-launcher').getBoundingClientRect(); return r.left>=0 && r.top>=0 && r.right<=innerWidth+1 && r.bottom<=innerHeight+1; })()");
+            if (!fits) throw new Error('launcher stranded outside resized viewport');
+            await send('Emulation.setDeviceMetricsOverride', { width:tauri ? 393 : 920, height:tauri ? 851 : 1050, deviceScaleFactor:1, mobile:tauri });
+            await sleep(100);
+            await evaluate("document.querySelector('#fm-launcher').click()");
+            if (!await evaluate("document.querySelector('#floor-memory').open && document.querySelectorAll('#fm-form').length === 1")) throw new Error('window unavailable after resize');
+        });
+    }
     await writeFile(resolve(artifacts, artifactPrefix + '-results.json'), JSON.stringify({ ...result, exceptions }, null, 2));
     for (const passed of result.passed) console.log('PASS ' + passed);
     for (const failure of result.failures) console.error('FAIL ' + failure);
     if (result.failures.length || exceptions.length) process.exitCode = 1;
     console.log(result.passed.length + ' browser checks passed; ' + result.failures.length + ' failed.');
-    await send('Runtime.evaluate', { expression: "document.querySelector('#fm-ai-panel').open = true; document.querySelector('#fm-ai-panel').scrollIntoView();", returnByValue:true });
+    await send('Runtime.evaluate', { expression: "if (!document.querySelector('#floor-memory').open) document.querySelector('#fm-launcher').click(); document.querySelector('.fm-window-body').scrollTop = 0;", returnByValue:true });
     await send('Page.bringToFront');
     try {
         const screenshot = await send('Page.captureScreenshot', { format:'png', captureBeyondViewport:false });

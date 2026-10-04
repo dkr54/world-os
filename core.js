@@ -362,7 +362,7 @@ export function containsKeyword(text, keyword) {
     return containsNormalizedKeyword(normalizeText(text), normalizeText(keyword).trim());
 }
 
-/** Only explicitly configured per-floor keywords participate; no tokenization. */
+/** Explicit keywords only. Select newer matching floors first, regardless of match count. */
 export function rankKeywords(records, query, settings) {
     if (!settings.keywordEnabled || !query.trim()) return [];
     const normalizedQuery = normalizeText(query);
@@ -377,7 +377,7 @@ export function rankKeywords(records, query, settings) {
                 .map(([, label]) => label);
             return { record, reason: 'keyword', matched, score: matched.length };
         }).filter(hit => hit.score > 0)
-        .sort((a, b) => b.score - a.score || b.record.floor - a.record.floor);
+        .sort((a, b) => b.record.floor - a.record.floor);
 }
 
 /** Keyword matches always win. Vector search only sees unmatched old floors. */

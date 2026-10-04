@@ -56,8 +56,34 @@ let ctx = {
 };
 globalThis.SillyTavern = { getContext:() => ctx };
 const workerUrls = [];
+const layoutListeners = new Set();
+const testLayout = (insets = { top:0, right:0, bottom:0, left:0 }, keyboardOffset = 0) => ({
+    safeInsets: insets,
+    safeFrame: { left:insets.left, top:insets.top, width:innerWidth - insets.left - insets.right, height:innerHeight - insets.top - insets.bottom },
+    ime: { keyboardOffset },
+});
 if (tauri) {
     globalThis.__TAURI_RUNNING__ = true;
+    // Relevant fullscreen contract from TauriTavern v2.3.0 mobile-geometry-firewall.
+    // Test host !important overrides as well as the extension's own fallback CSS.
+    const geometry = document.createElement('style');
+    geometry.textContent = `
+        :root { --tt-inset-top:0px; --tt-inset-right:0px; --tt-inset-bottom:0px; --tt-inset-left:0px; --tt-ime-bottom:0px;
+            --tt-viewport-bottom-inset:max(var(--tt-inset-bottom), var(--tt-ime-bottom)); }
+        @media (max-width:1000px) {
+            body [data-tt-mobile-surface="fullscreen-window"][data-tt-mobile-surface][data-tt-mobile-surface] {
+                position:fixed !important;
+                top:max(var(--tt-inset-top),0px) !important;
+                left:max(var(--tt-inset-left),0px) !important;
+                right:max(var(--tt-inset-right),0px) !important;
+                bottom:max(var(--tt-viewport-bottom-inset),0px) !important;
+                width:auto !important; height:auto !important;
+                max-width:none !important; max-height:none !important;
+                min-width:0 !important; min-height:0 !important; margin:0 !important;
+            }
+        }`;
+    document.head.append(geometry);
+    globalThis.addEventListener('resize', () => { for (const callback of layoutListeners) callback(testLayout()); });
     const NativeWorker = globalThis.Worker;
     globalThis.Worker = class extends NativeWorker {
         constructor(url, options) {
@@ -67,7 +93,10 @@ if (tauri) {
         }
     };
     setTimeout(() => {
-        globalThis.__TAURITAVERN__ = { ready: new Promise(resolve => setTimeout(resolve, 100)) };
+        globalThis.__TAURITAVERN__ = {
+            ready: new Promise(resolve => setTimeout(resolve, 100)),
+            api: { layout: { subscribe(callback) { layoutListeners.add(callback); callback(testLayout()); return () => layoutListeners.delete(callback); } } },
+        };
     }, 100);
 }
 const notices = [];
@@ -90,6 +119,63 @@ try {
     });
     await waitFor(() => document.querySelector('#fm-form'), 'settings mount');
     await delay(450);
+    await check('扩展页只保留启用开关；关闭状态也能从首页打开独立悬浮窗口', async () => {
+        const host = document.querySelector('#extensions_settings2');
+        const panel = document.querySelector('#floor-memory');
+        const launcher = document.querySelector('#fm-launcher');
+        assert(host.querySelectorAll('input,button,select,textarea').length === 1, 'extension page still contains full settings');
+        assert(host.querySelector('#fm-enabled')?.type === 'checkbox', 'enable switch missing');
+        assert(!host.contains(panel) && panel.parentElement === document.body, 'window still nested in extension drawer');
+        assert(!panel.open && launcher.getBoundingClientRect().width > 0, 'initial window/launcher visibility wrong');
+        launcher.click();
+        assert(panel.open && panel.matches(':modal'), 'launcher did not open modal');
+        assert(document.activeElement === document.querySelector('#fm-window-close'), 'opening unexpectedly focused an input');
+        assert(launcher.getAttribute('aria-expanded') === 'true', 'launcher state not updated');
+        launcher.click();
+        assert(document.querySelectorAll('#floor-memory').length === 1 && document.querySelectorAll('#fm-form').length === 1, 'duplicate window mounted');
+    });
+    await check('扩展启用开关立即保存且同步窗口，不提交其他设置草稿', async () => {
+        const panel = document.querySelector('#floor-memory');
+        const form = document.querySelector('#fm-form');
+        const saved = structuredClone(ctx.extensionSettings[MODULE_KEY]);
+        form.elements.recentCount.value = '777';
+        form.elements.extractPattern.value = '[';
+        panel.close();
+        const toggle = document.querySelector('#fm-enabled');
+        toggle.click();
+        assert(ctx.extensionSettings[MODULE_KEY].enabled === true && form.elements.enabled.checked, 'outside toggle not saved/synchronized');
+        assert(ctx.extensionSettings[MODULE_KEY].recentCount === saved.recentCount && ctx.extensionSettings[MODULE_KEY].extractPattern === saved.extractPattern, 'toggle submitted unrelated invalid draft');
+        toggle.click();
+        assert(!ctx.extensionSettings[MODULE_KEY].enabled, 'disable switch not immediate');
+        document.querySelector('#fm-launcher').click();
+        assert(form.elements.recentCount.value === '777' && form.elements.extractPattern.value === '[', 'close/open lost settings draft');
+        form.elements.enabled.click();
+        assert(toggle.checked && ctx.extensionSettings[MODULE_KEY].enabled, 'inside toggle not synchronized');
+        form.elements.enabled.click();
+        form.elements.recentCount.value = saved.recentCount;
+        form.elements.extractPattern.value = saved.extractPattern;
+    });
+    await check('关闭与 Escape 取消事件保留预设草稿和滚动位置，并恢复入口焦点', async () => {
+        const panel = document.querySelector('#floor-memory');
+        const scroll = panel.querySelector('.fm-window-body');
+        const content = panel.querySelector('.fm-ai-prompt [data-field="content"]');
+        const saved = content.value;
+        content.value = '尚未保存的预设草稿';
+        scroll.scrollTop = 150;
+        const position = scroll.scrollTop;
+        document.querySelector('#fm-window-close').click();
+        await waitFor(() => document.querySelector('#fm-launcher').getAttribute('aria-expanded') === 'false', 'close cleanup');
+        assert(document.activeElement === document.querySelector('#fm-launcher'), 'focus not restored');
+        document.querySelector('#fm-launcher').click();
+        assert(content.value === '尚未保存的预设草稿' && scroll.scrollTop === position, 'window reopen reset draft or scroll');
+        const event = new Event('cancel', { cancelable:true });
+        panel.dispatchEvent(event);
+        assert(event.defaultPrevented && !panel.open, 'native cancel not handled');
+        await delay(30);
+        document.querySelector('#fm-launcher').click();
+        content.value = saved;
+        scroll.scrollTop = 0;
+    });
     await check('只填未保存的 URL 和密钥即可自动拉取、下拉选择模型', async () => {
         const form = document.querySelector('#fm-form');
         form.elements.model.value = '';
@@ -723,7 +809,43 @@ try {
             assert(workerUrls.length > 0 && workerUrls.every(url => url.startsWith('blob:')), 'unexpected worker transport');
             const panel = document.querySelector('#floor-memory');
             for (const details of panel.querySelectorAll('details')) details.open = true;
-            assert(document.documentElement.scrollWidth <= innerWidth + 1, 'mobile settings overflow');
+            const scroll = panel.querySelector('.fm-window-body');
+            assert(panel.open && document.documentElement.scrollWidth <= innerWidth + 1, 'mobile settings overflow');
+            assert(scroll.scrollWidth <= scroll.clientWidth + 1, 'window content overflows horizontally');
+        });
+        await check('Tauri 安全边距和局部键盘高度生效，关闭按钮与底部表单均可达', async () => {
+            const panel = document.querySelector('#floor-memory');
+            assert(panel.dataset.ttMobileSurface === 'fullscreen-window', 'dialog not opted into mobile layout');
+            assert(document.querySelector('#fm-launcher').dataset.ttMobileSurface === 'free-window', 'launcher surface not opted in');
+            assert(layoutListeners.size === 1, 'host layout not subscribed exactly once');
+            const root = document.documentElement;
+            const insets = { top:32, right:12, bottom:24, left:6 };
+            for (const [edge, value] of Object.entries(insets)) root.style.setProperty('--tt-inset-' + edge, value + 'px');
+            root.style.setProperty('--tt-base-viewport-height', innerHeight + 'px');
+            panel.style.setProperty('--tt-ime-bottom', '320px');
+            for (const callback of layoutListeners) callback(testLayout(insets, 320 - insets.bottom));
+            await delay(50);
+            const rect = panel.getBoundingClientRect();
+            assert(rect.top >= insets.top && rect.left >= insets.left && rect.right <= innerWidth - insets.right, 'dialog outside safe area');
+            assert(rect.bottom <= innerHeight - 320 + 1, 'dialog hidden behind keyboard');
+            const scroll = panel.querySelector('.fm-window-body');
+            scroll.scrollTop = scroll.scrollHeight;
+            const close = panel.querySelector('#fm-window-close').getBoundingClientRect();
+            const last = panel.querySelector('#fm-next-page').getBoundingClientRect();
+            assert(close.top >= rect.top && close.bottom < rect.bottom, 'close button scrolled out');
+            assert(last.bottom <= rect.bottom && last.top >= close.bottom, 'bottom controls unreachable');
+            const draft = panel.querySelector('[name="model"]').value;
+            // Android host closes the topmost native dialog through close().
+            [...document.querySelectorAll('dialog[open]')].at(-1).close();
+            await delay(30);
+            assert(!panel.open && document.querySelector('#fm-launcher').getAttribute('aria-expanded') === 'false', 'native back close did not clean up');
+            document.querySelector('#fm-launcher').click();
+            assert(panel.querySelector('[name="model"]').value === draft, 'native back discarded draft');
+            for (const edge of Object.keys(insets)) root.style.removeProperty('--tt-inset-' + edge);
+            root.style.removeProperty('--tt-base-viewport-height');
+            panel.style.removeProperty('--tt-ime-bottom');
+            for (const callback of layoutListeners) callback(testLayout());
+            scroll.scrollTop = 0;
         });
         await check('导出等待 Android 原生保存，并报告真实保存位置及失败', async () => {
             const prior = globalThis.__nativeExports?.length ?? 0;

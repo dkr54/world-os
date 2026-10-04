@@ -1,5 +1,4 @@
 .floor-memory { --fm-accent: #88c9ba; line-height: 1.5; }
-.floor-memory .inline-drawer-content { padding: 8px 4px; }
 .floor-memory .fm-intro { margin: 4px 0 14px; opacity: .88; }
 .floor-memory label:not(.checkbox_label) { display: flex; flex-direction: column; gap: 5px; margin: 10px 0; }
 .floor-memory .checkbox_label { gap: 8px; margin: 10px 0; align-items: center; }
@@ -36,4 +35,90 @@
     .floor-memory .menu_button { min-height: 40px; white-space: normal; overflow-wrap: anywhere; }
     .floor-memory input:not([type="checkbox"]), .floor-memory textarea, .floor-memory select { font-size: 16px; }
     .floor-memory .fm-output { max-height: 55vh; }
+}
+
+/* Fixed entrance stays available even while memory injection is disabled. */
+#fm-launcher {
+    position: fixed;
+    z-index: 4004;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    max-width: calc(100vw - 16px);
+    padding: 10px 14px;
+    box-sizing: border-box;
+    border: 1px solid var(--SmartThemeBorderColor, #52665f);
+    border-radius: 24px;
+    background: var(--SmartThemeBlurTintColor, #202a2a);
+    color: var(--SmartThemeBodyColor, #edf4f1);
+    box-shadow: 0 4px 18px rgba(0, 0, 0, .3);
+    backdrop-filter: blur(12px);
+    font: inherit;
+    font-size: 14px;
+    line-height: 1.4;
+    cursor: pointer;
+    touch-action: none;
+    user-select: none;
+}
+#fm-launcher::before { content: ''; width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: #929b99; }
+#fm-launcher[data-enabled="true"]::before { background: #88c9ba; }
+#fm-launcher:focus-visible, #floor-memory button:focus-visible { outline: 2px solid #88c9ba; outline-offset: 2px; }
+#floor-memory-settings .checkbox_label { display: flex; }
+
+#floor-memory.fm-window {
+    --fm-safe-top: max(var(--tt-inset-top, env(safe-area-inset-top, 0px)), 0px);
+    --fm-safe-right: max(var(--tt-inset-right, env(safe-area-inset-right, 0px)), 0px);
+    --fm-safe-left: max(var(--tt-inset-left, env(safe-area-inset-left, 0px)), 0px);
+    --fm-safe-bottom: max(var(--tt-inset-bottom, env(safe-area-inset-bottom, 0px)), var(--tt-ime-bottom, 0px));
+    /* Re-evaluate the host contract on this surface, where Android injects IME height. */
+    --tt-viewport-bottom-inset: var(--fm-safe-bottom);
+    --fm-window-gap: 16px;
+    position: fixed;
+    inset: var(--fm-safe-top) var(--fm-safe-right) auto var(--fm-safe-left);
+    margin: var(--fm-window-gap) auto;
+    width: min(900px, calc(100% - var(--fm-safe-left) - var(--fm-safe-right) - var(--fm-window-gap) * 2));
+    height: min(880px, calc(var(--tt-base-viewport-height, var(--fm-viewport-height, 100dvh)) - var(--fm-safe-top) - var(--fm-safe-bottom) - var(--fm-window-gap) * 2));
+    min-width: 0;
+    max-width: none;
+    min-height: 0;
+    max-height: none;
+    padding: 0;
+    box-sizing: border-box;
+    border: 1px solid var(--SmartThemeBorderColor, #495650);
+    border-radius: 14px;
+    color: var(--SmartThemeBodyColor, #edf4f1);
+    background: var(--SmartThemeBlurTintColor, #20262c);
+    box-shadow: 0 18px 65px rgba(0, 0, 0, .45);
+    backdrop-filter: blur(16px);
+    text-align: left;
+    overflow: hidden;
+}
+#floor-memory.fm-window[open] { display: flex; flex-direction: column; }
+#floor-memory.fm-window:not([open]) { display: none; }
+#floor-memory.fm-window::backdrop { background: rgba(0, 0, 0, .48); }
+#floor-memory .fm-window-header {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px 8px 18px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor, #495650);
+}
+#floor-memory .fm-window-header h2 { margin: 0; font-size: 1.15em; font-weight: 600; }
+#floor-memory .fm-enabled-state { font-size: .82em; opacity: .7; }
+#floor-memory #fm-window-close { margin: 0 0 0 auto; min-width: 44px; height: 44px; padding: 0; font-size: 26px; line-height: 1; }
+#floor-memory .fm-window-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: 16px 18px;
+    scroll-padding-block: 16px;
+}
+@media (max-width: 600px) {
+    #floor-memory.fm-window { --fm-window-gap: 8px; border-radius: 12px; }
+    #floor-memory .fm-window-body { padding: 12px; }
+    #floor-memory .fm-window-header { padding-left: 12px; gap: 8px; }
 }

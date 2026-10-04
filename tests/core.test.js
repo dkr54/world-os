@@ -131,6 +131,28 @@ test('关键词命中已满 K 时不调用向量接口', async () => {
     assert.equal(calls, 0);
     assert.deepEqual(result.hits.map(hit => hit.record.id), ['b', 'c']);
 });
+test('关键词超过 K 时较新楼层优先，旧楼匹配更多词也不能挤掉新楼', async () => {
+    const candidates = [
+        record('old', 1, '旧总结', ['示例角色甲', '青石镇', '行宫']),
+        record('newest', 30, '最新总结', ['青石镇']),
+        record('newer', 20, '较新总结', ['示例角色甲']),
+        record('empty', 40, '无词总结', []),
+        record('unmatched', 50, '未匹配总结', ['雪山']),
+    ];
+    const before = structuredClone(candidates);
+    const query = '示例角色甲在青石镇的行宫';
+    assert.deepEqual(rankKeywords(candidates, query, config()).map(hit => hit.record.floor), [30, 20, 1]);
+    let calls = 0;
+    for (const vectorEnabled of [true, false]) {
+        const result = await retrieveMemories(candidates, query, config({ recallCount: 2, vectorEnabled, rerankEnabled: true }),
+            async () => { calls++; return []; });
+        // Selection is newest first; prompt assembly restores chronological order.
+        assert.deepEqual(result.hits.map(hit => hit.record.floor), [20, 30]);
+        assert.ok(result.hits.every(hit => hit.reason === 'keyword'));
+    }
+    assert.equal(calls, 0);
+    assert.deepEqual(candidates, before);
+});
 test('向量只接收未匹配楼层，补足 K 并按楼层顺序注入', async () => {
     const a = record('a', 1, 'old', ['旧事']);
     const b = record('b', 2, 'match', ['星钥']);

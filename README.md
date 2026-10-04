@@ -13,8 +13,8 @@ https://github.com/dkr54/floor-memory
 ```
 
 1. 确认安装，完成后重新加载页面／应用。
-2. 展开 **楼层记忆 · Floor Memory**，设置正则、N/M/K 和所需的模型接口。
-3. 勾选「启用楼层记忆」，点击「保存设置」。
+2. 点击首页／聊天页边缘的 **楼层记忆** 悬浮入口，设置正则、N/M/K 和所需的模型接口，点击「保存设置」。
+3. 打开「启用楼层记忆」开关，立即生效；扩展设置页只保留这个开关。
 4. 以后在扩展管理中检查并更新本插件，重新加载后使用新版本。
 
 仓库的默认分支是 `main`，`manifest.json` 和运行文件直接位于仓库根目录，可由宿主正常克隆和更新。支持通过仓库链接安装；GitHub 发布不会自动把插件加入 SillyTavern 的官方资源列表。宿主入口见 [SillyTavern 第三方扩展安装说明](https://docs.sillytavern.app/extensions/#third-party-extensions)。
@@ -22,6 +22,17 @@ https://github.com/dkr54/floor-memory
 如果提示同名扩展已存在，可先导出总结，再在扩展管理中移除旧的手动安装版本，随后使用上面的仓库链接安装。
 
 离线安装包见 [版本发布页](https://github.com/dkr54/floor-memory/releases)：普通扩展 ZIP 用于手动复制，TauriTavern ZIP 用于手机「数据迁移」导入。仓库维护和后续上传方法见 [发布与更新说明](https://github.com/dkr54/floor-memory/blob/main/PUBLISHING.md)。
+
+## 0.3.0 更新：悬浮窗口与最近命中优先
+
+- 完整页面移至首页的「楼层记忆」悬浮窗口；扩展设置页只显示启用开关。关闭插件时入口仍可打开，用于配置与管理。
+- 入口支持触摸／鼠标拖动，位置保存在当前设备；旋转或缩小屏幕时保持在可见范围。窗口使用独立滚动区，顶部关闭按钮始终可见。
+- 关闭按钮、Escape 和 TauriTavern Android 返回键均可关闭窗口，重新打开保留设置／预设草稿和滚动位置。关闭窗口不会保存设置，也不会取消正在进行的批量操作；需要取消时使用原有取消按钮。
+- 内外两个启用开关同步并立即保存，只改启用状态，不提交其他表单草稿。其他设置仍通过「保存设置」提交。
+- 关键词命中按楼层号从高到低选择，最多 K 楼；不再按命中词数量排优先级。关键词已满 K 时跳过 Embedding 和 Rerank，未满时继续按原规则补足。最终注入仍按从旧到新的时间顺序排列。
+- TauriTavern 使用官方 mobile surface / Layout API，处理安全边距、局部软键盘高度和悬浮入口位置；没有更改已有总结、关键词和模型配置的存储格式。
+
+移动端接口依据：[TauriTavern Layout API](https://github.com/Darkatse/TauriTavern/blob/v2.3.0/docs/API/Layout.md)；返回键使用宿主对标准 dialog 的关闭行为。保留原来的正则 Worker、工具消息投影和原生导出兼容。
 
 ## 0.2.0 更新：TauriTavern / Android
 
@@ -88,13 +99,13 @@ https://github.com/dkr54/floor-memory
 
 以 **TauriTavern 2.3.0** 为适配基线。
 
-1. 把 **floor-memory-tauritavern-0.2.0.zip** 下载到手机，保持 ZIP 原样。
+1. 把 **floor-memory-tauritavern-0.3.0.zip** 下载到手机，保持 ZIP 原样。
 2. 打开 TauriTavern 的 **数据迁移 / Data Migration**，选择 **导入数据归档 / Import Data Archive**，选中这个 ZIP。
-3. 宿主会提示合并数据并覆盖同路径文件。本包只有 `data/default-user/extensions/floor-memory/` 下的 12 个扩展运行文件，没有聊天、角色卡、密钥或 settings.json；导入只更新该扩展的文件。
+3. 宿主会提示合并数据并覆盖同路径文件。本包只有 `data/default-user/extensions/floor-memory/` 下的 13 个扩展运行文件，没有聊天、角色卡、密钥或 settings.json；导入只更新该扩展的文件。
 4. 导入结束后按宿主提示重新加载；若仍显示旧版，完全退出应用后重开。
-5. 在扩展设置中展开 **楼层记忆 · Floor Memory**，确认「运行环境：TauriTavern · Android」。填写接口、正则和 N/M/K，启用并保存。原有聊天数据随宿主迁移时，已保存在聊天 metadata 中的总结与关键词也会保留。
+5. 点击首页的 **楼层记忆** 悬浮入口，确认「运行环境：TauriTavern · Android」。填写接口、正则和 N/M/K 并保存，打开启用开关。原有聊天数据随宿主迁移时，已保存在聊天 metadata 中的总结与关键词也会保留。
 
-也可以解压普通 **floor-memory-0.2.0.zip**，将 `floor-memory` 文件夹放到实际数据目录下：
+也可以解压普通 **floor-memory-0.3.0.zip**，将 `floor-memory` 文件夹放到实际数据目录下：
 
 - 当前用户扩展：`data/default-user/extensions/floor-memory/`。
 - 全局扩展：`data/extensions/third-party/floor-memory/`。
@@ -108,13 +119,13 @@ Android 的安装包推荐走上面的导入入口，不需要手工访问受系
 
 ## SillyTavern 安装
 
-1. 解压 floor-memory-0.2.0.zip，得到 floor-memory 文件夹。
+1. 解压 floor-memory-0.3.0.zip，得到 floor-memory 文件夹。
 2. 把整个文件夹放进你的 **实际 SillyTavern 安装目录**：
 
    public/scripts/extensions/third-party/floor-memory/
 
 3. 确认 manifest.json 直接位于该文件夹内，而不是再多嵌套一层文件夹。
-4. 刷新 SillyTavern 页面，在扩展设置中展开 **楼层记忆 · Floor Memory**。
+4. 刷新 SillyTavern 页面，点击首页的 **楼层记忆** 悬浮入口。扩展设置页保留启用开关。
 5. 设置正则与 N/M/K，勾选「启用楼层记忆」，点击「保存设置」。
 
 也可以直接复制本项目的运行文件到上述文件夹。运行不需要构建、不需要安装 Node 依赖、不需要开启服务端插件。此工作区是扩展项目本身，不是完整的 SillyTavern 服务。
@@ -247,7 +258,7 @@ flags 为 gi，捕获组为 1。
 - 输入框保留原始标点和空格，输入后自动保存。英文忽略大小写并检查单词边界，中文支持片段匹配。
 - 手动关键词可以是别名，不要求该词同时出现在总结正文里，但必须命中当前查询文本。
 
-多个楼层命中时，按命中的手动词数量排序，同分优先较新的楼层，最多取 K 楼；注入时恢复原时间顺序。大小写与全角变体的重复词不重复计分。
+多个楼层命中时，按楼层号从高到低选择最近的 K 楼，与命中几个关键词无关；注入时恢复从旧到新的时间顺序。例如 K=3，命中第 8、15、24、31、40 楼，会选第 40、31、24 楼，最终按第 24、31、40 楼注入；不请求向量或重排。大小写与全角变体的重复词只显示一次。
 
 0.1.1 起没有补充词表，也没有自动分词流程。旧设置中的词表会被忽略，保存设置时清理；原有逐楼手动词继续有效。
 
@@ -533,10 +544,11 @@ npm run test:browser
 npm run test:tauri
 ~~~
 
-- 159 项 Node 测试：包括提取／召回、AI 空关键词补词、独立正则清洗与超时、用户名过滤、硅基流动参数、耗时统计、楼号映射及修改保护；新增实际 Qwen 数组响应复现、格式修复与拒绝歧义、原文标点保留及随机合法 JSON 往返检查。
-- 34 项原浏览器集成检查：包括三套独立模型列表、查询先清洗后召回、前三楼清空后补词、AI 清洗与耗时显示、角色预设、逐批保存、自动提取及编辑／切换聊天时的取消保护；新增夹杂已有关键词、跨批切换返回格式、乱序映射、修复后清洗保存、处理摘要和缺楼整批保护的验证。
-- 38 项 Android/Tauri 模拟宿主集成检查：在 393 像素宽度、Android UA 和 Tauri 扩展资源路径运行全部浏览器功能，并检查延迟 ready、classic Blob Worker、原生导出完成／失败、窄屏布局，以及 MCP 工具轮和剥离旧工具后的楼层映射。
-- 新增 Node 检查覆盖宿主启动超时、导出等待、冷滑动快照、大数组注入、工具调用中间附属消息与独立 Worker 执行时限。
+- 160 项 Node 测试：包括提取／召回、AI 空关键词补词、独立正则清洗与超时、用户名过滤、硅基流动参数、耗时统计、楼号映射及修改保护；新增实际 Qwen 数组响应复现、格式修复与拒绝歧义、原文标点保留及随机合法 JSON 往返检查。
+- 39 项浏览器集成检查：包括三套独立模型列表、查询先清洗后召回、前三楼清空后补词、AI 清洗与耗时显示、角色预设、逐批保存、自动提取及编辑／切换聊天时的取消保护；新增夹杂已有关键词、跨批切换返回格式、乱序映射、修复后清洗保存、处理摘要和缺楼整批保护的验证。
+- 44 项 Android/Tauri 模拟宿主集成检查：在 393 像素宽度、Android UA 和 Tauri 扩展资源路径运行全部浏览器功能，并检查延迟 ready、classic Blob Worker、原生导出完成／失败、窄屏布局，以及 MCP 工具轮和剥离旧工具后的楼层映射。
+- 本次新增悬浮窗口入口、开关独立保存、草稿与滚动位置、真实点击／Escape／拖动、旋转尺寸变化，以及宿主强制布局下的安全边距和软键盘可达性验证。Node 新增“旧楼多词不能挤掉新楼”的召回用例。
+- Node 检查覆盖宿主启动超时、导出等待、冷滑动快照、大数组注入、工具调用中间附属消息与独立 Worker 执行时限。
 - 浏览器测试使用已安装的 Edge / Chrome / Chromium；可用 FLOOR_MEMORY_BROWSER 环境变量指定可执行文件。
 - 测试仅启动本机模拟 Embedding / Rerank / Chat Completions 服务和隐藏浏览器，不访问真实模型服务。
 - 测试截图及报告位于 .tmp/，不包含在安装包中。
@@ -549,4 +561,4 @@ npm run test:tauri
 
 ### 打包
 
-在本项目目录运行 `powershell -NoProfile -File ./build-package.ps1`，生成普通扩展 ZIP 和 Android 数据迁移 ZIP。脚本逐个核对归档路径和文件哈希，只打包列出的 12 个运行文件，不包含测试、参考源码或本地缓存。
+在本项目目录运行 `powershell -NoProfile -File ./build-package.ps1`，生成普通扩展 ZIP 和 Android 数据迁移 ZIP。脚本逐个核对归档路径和文件哈希，只打包列出的 13 个运行文件，不包含测试、参考源码或本地缓存。
