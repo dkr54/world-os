@@ -82,7 +82,10 @@ export function mountFloatingWindow(panel, { host, enabled, onEnabledChange, mas
             control.focus({ preventScroll: true });
         }
     };
-    for (const [name, button] of appButtons) button.addEventListener('click', () => showPage(name));
+    panel.addEventListener('click', event => {
+        const button = event.target.closest?.('[data-wo-app]'), name = button?.dataset.woApp;
+        if (button && appButtons.get(name) === button) showPage(name);
+    });
     back.addEventListener('click', () => showPage('home'));
     scroll.addEventListener('scroll', rememberScroll);
     showPage('home', false);
@@ -191,5 +194,15 @@ export function mountFloatingWindow(panel, { host, enabled, onEnabledChange, mas
             .catch(error => console.warn('[world os] Layout subscription:', error.message));
     } catch (error) { console.warn('[world os] Layout subscription:', error.message); }
     refreshLayout();
-    return { setEnabled, setWorldEnabled, openApp(name) { if (!panel.open) launcher.click(); showPage(name); } };
+    return { setEnabled, setWorldEnabled, showApp(name) { showPage(name,false); }, openApp(name) { if (!panel.open) launcher.click(); showPage(name); },
+        registerApp(name, { button, page }) {
+            if (!name.startsWith('lab:') || pages.has(name)) throw new Error('应用入口重复或名称无效。');
+            button.dataset.woApp = name; page.dataset.woPage = name; pages.set(name,page); appButtons.set(name,button);
+        },
+        unregisterApp(name) {
+            if (!name.startsWith('lab:')) return;
+            if (currentPage === name) showPage('home');
+            pages.delete(name); appButtons.delete(name); positions.delete(name);
+        },
+    };
 }

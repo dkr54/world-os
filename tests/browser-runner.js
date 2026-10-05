@@ -303,6 +303,24 @@ try {
             await tap('#wo-back');await tap('#wo-open-snapshot');
             if (!await evaluate("document.querySelector('#world-os').dataset.page==='snapshot'")) throw new Error('snapshot touch failed');
         });
+        if (tauri) await uiCheck('Android 触摸实验室开关、首页包入口和返回按钮均可操作', async () => {
+            const tap = async selector => {
+                const point = await evaluate("(() => { const node=document.querySelector(" + JSON.stringify(selector) + "); node.scrollIntoView({block:'center'}); const r=node.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()");
+                await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...point,id:1,radiusX:1,radiusY:1,force:1}]});
+                await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]}); await sleep(100);
+            };
+            await evaluate("globalThis.__showLaboratoryFixture()");
+            await tap('#wo-lab-list input[type=checkbox]');
+            if (await evaluate("Boolean(document.querySelector('#wo-lab-home-apps button'))")) throw new Error('touch did not disable package');
+            await tap('#wo-lab-list input[type=checkbox]');
+            await tap('#wo-back');
+            await tap('#wo-lab-home-apps button');
+            if (!await evaluate("document.querySelector('#world-os').dataset.page==='lab:test.notes' && Boolean(document.querySelector('.wo-lab-frame'))")) throw new Error('touch did not open package');
+            await tap('#wo-back');
+            if (!await evaluate("document.querySelector('#world-os').dataset.page==='home' && !document.querySelector('.wo-lab-frame')")) throw new Error('touch back did not stop package');
+            await tap('#wo-open-laboratory');
+            if (!await evaluate("document.querySelector('#world-os').dataset.page==='laboratory'")) throw new Error('touch did not open laboratory');
+        });
     }
     await writeFile(resolve(artifacts, artifactPrefix + '-results.json'), JSON.stringify({ ...result, exceptions }, null, 2));
     for (const passed of result.passed) console.log('PASS ' + passed);
@@ -312,7 +330,7 @@ try {
     await send('Runtime.evaluate', { expression: "if (!document.querySelector('#world-os').open) document.querySelector('#wo-launcher').click(); document.querySelector('#wo-back').click(); document.querySelector('.wo-window-body').scrollTop = 0; document.fonts.ready", awaitPromise:true, returnByValue:true });
     await send('Page.bringToFront');
     try {
-        for (const view of ['home', 'memory', 'calendar', 'calendar-time', 'characters', 'character-detail', 'relationships', 'character-api', 'character-debug', 'snapshot', 'character-defaults', 'character-cg', 'cg-chat']) {
+        for (const view of ['home', 'memory', 'calendar', 'calendar-time', 'characters', 'character-detail', 'relationships', 'character-api', 'character-debug', 'snapshot', 'character-defaults', 'character-cg', 'laboratory', 'laboratory-app', 'cg-chat']) {
             if (view === 'memory') await send('Runtime.evaluate', { expression: "document.querySelector('#wo-open-floor-memory').click(); for (const section of document.querySelectorAll('#floor-memory details')) section.open = false; document.querySelector('.wo-window-body').scrollTop = 0;", returnByValue:true });
             if (view === 'calendar') await send('Runtime.evaluate', { expression: "document.querySelector('#wo-open-calendar').click(); document.querySelector('.wo-window-body').scrollTop = 0;", returnByValue:true });
             if (view === 'calendar-time') await send('Runtime.evaluate', { expression: "document.querySelector('#world-os').close(); document.querySelector('#wo-calendar-quick').click();", returnByValue:true });
@@ -324,6 +342,8 @@ try {
             if (view === 'snapshot') await send('Runtime.evaluate',{expression:"document.querySelector('#wo-open-snapshot').click();",returnByValue:true});
             if (view === 'character-defaults') await send('Runtime.evaluate',{expression:"globalThis.__showDefaultStateFixture()",returnByValue:true});
             if (view === 'character-cg') await send('Runtime.evaluate',{expression:"globalThis.__showCGFixture()",returnByValue:true});
+            if (view === 'laboratory') await send('Runtime.evaluate',{expression:"globalThis.__showLaboratoryFixture()",returnByValue:true});
+            if (view === 'laboratory-app') { await send('Runtime.evaluate',{expression:"globalThis.__showLaboratoryAppFixture()",returnByValue:true}); await sleep(350); }
             if (view === 'cg-chat') await send('Runtime.evaluate',{expression:"globalThis.__showCGChatFixture()",returnByValue:true});
             await sleep(40);
             const screenshot = await send('Page.captureScreenshot', { format:'png', captureBeyondViewport:false });

@@ -26,7 +26,14 @@
         <button type="button" id="wo-open-snapshot" class="wo-app" data-wo-app="snapshot" aria-controls="wo-snapshot">
           <span class="wo-app-icon wo-snapshot-icon"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></span><span class="wo-app-label">状态快照</span>
         </button>
+        <button type="button" id="wo-open-laboratory" class="wo-app" data-wo-app="laboratory" aria-controls="wo-laboratory">
+          <span class="wo-app-icon wo-lab-icon"><i class="fa-solid fa-flask" aria-hidden="true"></i></span><span class="wo-app-label">实验室</span>
+        </button>
       </nav>
+      <div id="wo-lab-home-section" hidden>
+        <p class="wo-section-label">本卡功能包</p>
+        <nav id="wo-lab-home-apps" class="wo-app-grid" aria-label="当前角色卡已启用功能包"></nav>
+      </div>
     </section>
     <section id="floor-memory" class="floor-memory" data-wo-page="floor-memory" data-wo-title="楼层记忆" aria-label="楼层记忆功能页" hidden>
       <p class="fm-intro">把回复中的总结变成长期记忆。每条模型回复及其前面的用户消息算一楼。</p>
@@ -378,9 +385,27 @@
         <button type="button" class="menu_button" data-ch-tab="debug"><i class="fa-solid fa-bug" aria-hidden="true"></i><span>调试</span></button>
       </nav>
     </section>
+    <section id="wo-laboratory" class="wo-laboratory floor-memory" data-wo-page="laboratory" data-wo-title="实验室" hidden>
+      <p class="fm-intro">导入一次，所有角色卡都能使用。是否启用与配置按角色卡保存，同一卡的不同聊天共享。</p>
+      <p id="wo-lab-scope" class="fm-hint"></p>
+      <details><summary>导入功能包</summary>
+        <p class="fm-hint">支持 .worldos.json 和 ZIP。功能包包含可执行脚本，请导入你信任的作者提供的文件。关闭页面后停止运行。</p>
+        <label>选择功能包<input id="wo-lab-file" type="file" accept=".json,.zip,application/json,application/zip"></label>
+        <pre id="wo-lab-preview" class="fm-output"></pre>
+        <div class="fm-actions"><button id="wo-lab-install" type="button" class="menu_button" disabled>确认全局导入</button><button id="wo-lab-example" type="button" class="menu_button">下载示例笔记包</button></div>
+      </details>
+      <p id="wo-lab-count" class="fm-hint"></p>
+      <div id="wo-lab-list"></div>
+      <section id="wo-lab-settings-editor" hidden>
+        <h3 id="wo-lab-settings-title"></h3>
+        <form id="wo-lab-settings-form"><label>配置 JSON<textarea id="wo-lab-settings-json" class="text_pole fm-code" rows="10" spellcheck="false"></textarea></label>
+          <div class="fm-actions"><button type="submit" class="menu_button">保存本卡配置</button><button id="wo-lab-settings-close" type="button" class="menu_button">关闭配置</button></div></form>
+      </section>
+      <p id="wo-lab-status" class="fm-status" role="status" aria-live="polite"></p>
+    </section>
     <section id="wo-snapshot" class="wo-snapshot floor-memory" data-wo-page="snapshot" data-wo-title="状态快照" hidden>
       <h3>保存世界的当前状态</h3>
-      <p class="fm-hint">快照包含 world os 设置、所有已配置角色卡的日历与角色目录，以及当前聊天的日期、角色状态和楼层记忆。不包含聊天原文、其他聊天的状态或可重建的向量缓存。</p>
+      <p class="fm-hint">快照包含 world os 设置、所有已配置角色卡的日历、角色目录与功能包配置、全局导入的功能包，以及当前聊天的日期、角色状态、楼层记忆和功能包数据。不包含聊天原文、其他聊天的状态或可重建的向量缓存。</p>
       <p id="wo-snapshot-scope" class="fm-hint"></p>
       <label class="checkbox_label"><input id="wo-snapshot-keys" type="checkbox">同时包含已保存的 API 密钥（文件为明文，请妥善保管）</label>
       <button id="wo-snapshot-export" type="button" class="menu_button"><i class="fa-solid fa-download" aria-hidden="true"></i> 导出当前快照</button>

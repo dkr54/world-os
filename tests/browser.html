@@ -947,6 +947,8 @@ try {
     await runCharacterChecks({ check, assert, waitFor, delay, emit, getContext:()=>ctx, setContext:value=>{ctx=value;}, tauri, macros:registeredMacros });
     const { runCalendarChecks } = await import('/tests/calendar-browser.js');
     await runCalendarChecks({ check, assert, waitFor, delay, emit, getContext:()=>ctx, setContext:value=>{ctx=value;}, tauri, testLayout, layoutListeners });
+    const { runLaboratoryChecks } = await import('/tests/laboratory-browser.js');
+    await runLaboratoryChecks({ check, assert, waitFor, delay, emit, getContext:()=>ctx, setContext:value=>{ctx=value;}, tauri });
     globalThis.__testResult = { passed:checks, failures };
 } catch (error) {
     document.querySelector('#browser-test-result').textContent = error.stack;

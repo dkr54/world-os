@@ -5,9 +5,10 @@ import { validateCGFloors } from './character-cg.js';
 import { validateStateAPI } from './character-api.js';
 import { WORLD_KEY, announceWorldChange } from './world-state.js';
 import { downloadMemory } from './host-runtime.js';
+import { LAB_KEY, validateLabSettings, validateLabChat } from './laboratory-core.js';
 
-const SETTINGS_KEYS = [WORLD_KEY,MODULE_KEY,CALENDAR_KEY,CHARACTERS_KEY];
-const CHAT_KEYS = [MODULE_KEY,CALENDAR_KEY,CHARACTERS_KEY];
+const SETTINGS_KEYS = [WORLD_KEY,MODULE_KEY,CALENDAR_KEY,CHARACTERS_KEY,LAB_KEY];
+const CHAT_KEYS = [MODULE_KEY,CALENDAR_KEY,CHARACTERS_KEY,LAB_KEY];
 const SECRET_PATHS = [
     [MODULE_KEY,'apiKey'],[MODULE_KEY,'rerankApiKey'],[MODULE_KEY,'aiKeywordApiKey'],[CHARACTERS_KEY,'api','apiKey'],
 ];
@@ -38,8 +39,8 @@ export function validateSnapshot(input) {
         || typeof data.includeKeys !== 'boolean' || !plainObject(data.settings) || !plainObject(data.metadata)) throw new Error('快照头或数据格式无效。');
     const [owner,chatId] = JSON.parse(data.scope);
     if (owner !== data.owner || chatId === null || chatId === undefined || chatId === '') throw new Error('快照聊天标识无效。');
-    if (Object.keys(data.settings).some(key => !SETTINGS_KEYS.includes(key)) || SETTINGS_KEYS.some(key => !Object.hasOwn(data.settings,key))
-        || Object.keys(data.metadata).some(key => !CHAT_KEYS.includes(key)) || CHAT_KEYS.some(key => !Object.hasOwn(data.metadata,key))) throw new Error('快照包含未知模块或缺少模块。');
+    if (Object.keys(data.settings).some(key => !SETTINGS_KEYS.includes(key)) || SETTINGS_KEYS.some(key => key !== LAB_KEY && !Object.hasOwn(data.settings,key))
+        || Object.keys(data.metadata).some(key => !CHAT_KEYS.includes(key)) || CHAT_KEYS.some(key => key !== LAB_KEY && !Object.hasOwn(data.metadata,key))) throw new Error('快照包含未知模块或缺少模块。');
     const global = data.settings[WORLD_KEY];
     if (global !== null && (!plainObject(global) || (global.enabled !== undefined && typeof global.enabled !== 'boolean'))) throw new Error('总开关配置无效。');
     const memory = data.settings[MODULE_KEY];
@@ -66,6 +67,8 @@ export function validateSnapshot(input) {
         if (directory.api !== undefined) validateStateAPI(directory.api);
         if (directory.queryCleanup !== undefined) directory.queryCleanup = validateCharacterQueryCleanup(directory.queryCleanup);
     }
+    if (data.settings[LAB_KEY] != null) data.settings[LAB_KEY] = validateLabSettings(data.settings[LAB_KEY]);
+    if (data.metadata[LAB_KEY] != null) data.metadata[LAB_KEY] = validateLabChat(data.metadata[LAB_KEY]);
     const date = data.metadata[CALENDAR_KEY];
     if (date !== null) validateDate(date.date,validateCalendar(calendar?.cards?.[data.owner] ?? DEFAULT_CALENDAR).months);
     const records = data.metadata[MODULE_KEY];
@@ -100,30 +103,32 @@ export async function restoreSnapshot(input, ctx, { allowOtherChat = false, getC
     const data = validateSnapshot(input), scope = calendarChat(ctx);
     if (!scope || calendarOwner(ctx) !== data.owner) throw new Error('请打开快照所属的角色卡后恢复。');
     if (scope !== data.scope && !allowOtherChat) throw new Error('快照来自其他聊天，请确认“允许恢复到另一个聊天”。');
+    const settingsKeys = SETTINGS_KEYS.filter(key => Object.hasOwn(data.settings,key));
+    const chatKeys = CHAT_KEYS.filter(key => Object.hasOwn(data.metadata,key));
     beforeRestore();
-    const oldSettings = Object.fromEntries(SETTINGS_KEYS.map(key => [key,ctx.extensionSettings[key]]));
-    const oldMetadata = Object.fromEntries(CHAT_KEYS.map(key => [key,ctx.chatMetadata[key]]));
-    const nextSettings = Object.fromEntries(SETTINGS_KEYS.map(key => [key,
+    const oldSettings = Object.fromEntries(settingsKeys.map(key => [key,ctx.extensionSettings[key]]));
+    const oldMetadata = Object.fromEntries(chatKeys.map(key => [key,ctx.chatMetadata[key]]));
+    const nextSettings = Object.fromEntries(settingsKeys.map(key => [key,
         data.settings[key] === null ? undefined : cloneJSON(data.settings[key])]));
     if (!data.includeKeys) for (const path of SECRET_PATHS) {
         const existing = secretContainer(ctx.extensionSettings,path);
         const value = existing?.[path.at(-1)];
         if (value !== undefined && value !== '') secretContainer(nextSettings,path,true)[path.at(-1)] = value;
     }
-    const nextMetadata = Object.fromEntries(CHAT_KEYS.map(key => [key,data.metadata[key] === null ? undefined : cloneJSON(data.metadata[key])]));
+    const nextMetadata = Object.fromEntries(chatKeys.map(key => [key,data.metadata[key] === null ? undefined : cloneJSON(data.metadata[key])]));
     const write = (object,values) => { for (const [key,value] of Object.entries(values)) if (value === undefined) delete object[key]; else object[key] = value; };
     // Save current chat first; settings only become durable once chat persistence succeeds.
     write(ctx.chatMetadata,nextMetadata);
     try {
         await ctx.saveMetadata();
         if (getContext().chatMetadata !== ctx.chatMetadata || calendarChat(getContext()) !== scope) throw new Error('保存期间聊天已切换；快照未恢复到新聊天。请返回原聊天检查。');
-        if (CHAT_KEYS.some(key => ctx.chatMetadata[key] !== nextMetadata[key])) throw new Error('恢复期间状态再次被修改，本次恢复已停止。');
+        if (chatKeys.some(key => ctx.chatMetadata[key] !== nextMetadata[key])) throw new Error('恢复期间状态再次被修改，本次恢复已停止。');
         write(ctx.extensionSettings,nextSettings); ctx.saveSettingsDebounced();
     } catch (error) {
-        for (const key of CHAT_KEYS) if (ctx.chatMetadata[key] === nextMetadata[key]) {
+        for (const key of chatKeys) if (ctx.chatMetadata[key] === nextMetadata[key]) {
             if (oldMetadata[key] === undefined) delete ctx.chatMetadata[key]; else ctx.chatMetadata[key] = oldMetadata[key];
         }
-        for (const key of SETTINGS_KEYS) if (ctx.extensionSettings[key] === nextSettings[key]) {
+        for (const key of settingsKeys) if (ctx.extensionSettings[key] === nextSettings[key]) {
             if (oldSettings[key] === undefined) delete ctx.extensionSettings[key]; else ctx.extensionSettings[key] = oldSettings[key];
         }
         if (getContext().chatMetadata === ctx.chatMetadata && calendarChat(getContext()) === scope) {
@@ -163,7 +168,8 @@ export function mountSnapshots(root, { getContext }) {
         find('preview').textContent = '保存时间：' + new Date(imported.createdAt).toLocaleString() + '\n角色卡：' + imported.owner.replace(/^(character|group):/,'') + '\n聊天：' + JSON.parse(imported.scope)[1]
             + '\n密钥：' + (imported.includeKeys ? '包含已保存的密钥' : '不包含，恢复时保留本机已有密钥')
             + '\n角色状态：' + Object.keys(imported.metadata[CHARACTERS_KEY]?.states ?? {}).length + ' 个'
-            + '\n楼层记忆：' + (imported.metadata[MODULE_KEY]?.records?.length ?? 0) + ' 楼';
+            + '\n楼层记忆：' + (imported.metadata[MODULE_KEY]?.records?.length ?? 0) + ' 楼'
+            + '\n实验室：' + Object.keys(imported.settings[LAB_KEY]?.packages ?? {}).length + ' 个功能包（包含页面脚本，仅恢复可信来源的快照）';
         status('快照已校验。确认所示范围后，点击“恢复所选快照”。');
     }));
     find('restore').addEventListener('click',() => void action(async () => {

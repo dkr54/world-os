@@ -1,0 +1,19 @@
+{
+  "format": "world-os-package",
+  "schema": 1,
+  "id": "demo.notes",
+  "name": "示例笔记",
+  "version": "1.0.0",
+  "description": "演示同一卡共享配置，以及各聊天独立保存笔记。",
+  "author": "world os",
+  "icon": "fa-note-sticky",
+  "permissions": [],
+  "entry": "index.html",
+  "defaultSettings": {
+    "title": "我的笔记"
+  },
+  "files": {
+    "index.html": "<main><h1 id=\"title\"></h1><p id=\"scope\"></p><label>标题（同一卡共享）<input id=\"heading\"></label><button id=\"save-settings\">保存标题</button><label>笔记（当前聊天）<textarea id=\"note\" rows=\"8\"></textarea></label><button id=\"save-note\">保存笔记</button><p id=\"status\" role=\"status\"></p></main><script src=\"app.js\"></script>",
+    "app.js": "(async()=>{await worldOS.ready;const c=await worldOS.getContext(),s=await worldOS.getSettings(),v=await worldOS.getState();const q=id=>document.getElementById(id);q('title').textContent=s.title||'笔记';q('heading').value=s.title||'';q('scope').textContent=c.characterName+' · '+(c.chatId||'尚未打开聊天');q('note').value=v.note||'';q('save-settings').onclick=async()=>{try{await worldOS.setSettings({title:q('heading').value});q('title').textContent=q('heading').value;q('status').textContent='标题已保存';}catch(e){q('status').textContent=e.message;}};q('save-note').onclick=async()=>{try{await worldOS.setState({note:q('note').value});q('status').textContent='笔记已保存';}catch(e){q('status').textContent=e.message;}};})().catch(e=>worldOS.notify(e.message));"
+  }
+}

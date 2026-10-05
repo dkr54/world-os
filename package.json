@@ -1,6 +1,6 @@
 {
   "name": "world-os",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "world os 世界操作系统：楼层记忆、自定义日历、角色目录、状态与关系管理。",
@@ -8,7 +8,7 @@
     "test": "node --test tests/*.test.js",
     "test:browser": "node tests/browser-runner.js",
     "test:tauri": "node tests/browser-runner.js --tauri",
-    "check": "node --check character-cg.js && node --check world-state.js && node --check characters-core.js && node --check character-api.js && node --check characters-engine.js && node --check characters.js && node --check snapshots.js && node --check calendar-core.js && node --check calendar.js && node --check floating-window.js && node --check host-runtime.js && node --check index.js && node --check core.js && node --check embeddings.js && node --check keyword-ai.js && node --check keyword-json.js && node --check regex-runner.js && node --check regex-worker.js"
+    "check": "node --check laboratory-core.js && node --check laboratory-package.js && node --check laboratory-runtime.js && node --check laboratory.js && node --check character-cg.js && node --check world-state.js && node --check characters-core.js && node --check character-api.js && node --check characters-engine.js && node --check characters.js && node --check snapshots.js && node --check calendar-core.js && node --check calendar.js && node --check floating-window.js && node --check host-runtime.js && node --check index.js && node --check core.js && node --check embeddings.js && node --check keyword-ai.js && node --check keyword-json.js && node --check regex-runner.js && node --check regex-worker.js"
   },
   "engines": {
     "node": ">=20"
