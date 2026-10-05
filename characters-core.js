@@ -1,5 +1,5 @@
 import { calendarOwner, calendarChat } from './calendar-core.js';
-import { normalizeText, splitKeywords } from './core.js';
+import { normalizeText, splitKeywords, compileRegex } from './core.js';
 import { validateCGs, isCGMacro, cgPrompt } from './character-cg.js';
 
 export const CHARACTERS_KEY = 'world_os_characters';
@@ -228,8 +228,17 @@ export function recentCharacterQuery(chat) {
         && !(message.extra?.tool_invocations?.length) && typeof message.mes === 'string' && message.mes.trim())
         .slice(-2).map(message => message.mes).join('\n\n');
 }
-export function selectCharacters(ctx, chat = ctx.chat) {
-    const query = recentCharacterQuery(chat);
+export function validateCharacterQueryCleanup(value = {}) {
+    if (!plainObject(value)) throw new Error('角色查询清洗设置无效。');
+    const rule = { pattern:value.pattern ?? '',flags:value.flags ?? 'gi',replacement:value.replacement ?? '' };
+    if (Object.values(rule).some(text => typeof text !== 'string' || text.length > 10000)) throw new Error('查询清洗规则需要文本，且每项不超过 10000 字。');
+    if (rule.pattern) {
+        try { compileRegex(rule.pattern,rule.flags); }
+        catch (error) { throw new Error('角色查询清洗正则：' + error.message); }
+    }
+    return rule;
+}
+export function selectCharacters(ctx, chat = ctx.chat, query = recentCharacterQuery(chat)) {
     const normalized = normalizeText(query);
     const directory = directoryOf(ctx);
     const items = directory.filter(character => character.enabled !== false && character.keywords?.some(keyword =>

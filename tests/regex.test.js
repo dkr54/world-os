@@ -82,3 +82,18 @@ test('慢启动不消耗正则执行预算，启动超时与执行超时分别�
     await assert.rejects(new RegexRunner({ WorkerClass: SlowWorker, startupTimeoutMs: 20 }).run(['test'], DEFAULT_SETTINGS), /启动超时/);
     assert.equal(terminated, 2);
 });
+
+import { CharacterEngine } from '../characters-engine.js';
+
+test('角色查询复用真实正则线程，思考内容先移除；超时后不注入原文角色',async()=>{
+    const ctx={characterId:0,characters:[{avatar:'test.png'}],chatId:'query-chat',chatMetadata:{},
+        chat:[{mes:'<thinking>苏岚</thinking>示例角色甲',is_user:false},{mes:'继续',is_user:true}],
+        extensionSettings:{world_os_characters:{cards:{'character:test.png':[
+            {id:'a',name:'示例角色甲',keywords:['示例角色甲'],description:'正文角色',stages:[],baseState:{},cgs:[]},
+            {id:'b',name:'苏岚',keywords:['苏岚'],description:'隐藏角色',stages:[],baseState:{},cgs:[]},
+        ]},queryCleanup:{pattern:'<thinking>[\\s\\S]*?</thinking>',flags:'g',replacement:''}}}};
+    const engine=new CharacterEngine({getContext:()=>ctx,regex:new RegexRunner({WorkerClass:BrowserWorker,timeoutMs:150})});
+    engine.start();await engine.prepare();assert.deepEqual(engine.run.selection.items.map(p=>p.id),['a']);
+    ctx.chat=[{mes:'a'.repeat(100)+'!示例角色甲'}];ctx.extensionSettings.world_os_characters.queryCleanup={pattern:'(a+)+$',flags:'',replacement:''};
+    engine.changed();engine.start();await engine.prepare();assert.equal(engine.macro(),'');assert(engine.run.queryError.includes('超时'));engine.cancel();
+});

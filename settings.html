@@ -358,6 +358,16 @@
       </div>
       <div class="wo-ch-view" data-ch-view="debug" hidden>
         <h3>本轮调试</h3><p class="fm-hint">在聊天预设中启用一个包含 {{character}} 的条目。这里显示实际进入最终上下文的角色，以及本轮状态修改前后的差异。</p>
+        <details><summary>查询文本正则清洗</summary>
+          <form id="wo-ch-query-form">
+            <p class="fm-hint">仅用于角色目录的关键词查询，全局保存。先取最近两条用户或 AI 消息，再清洗、匹配；不改聊天原文。匹配正则留空时保持原逻辑。</p>
+            <label>匹配正则<textarea id="wo-ch-query-pattern" class="text_pole fm-code" rows="3" spellcheck="false" placeholder="<thinking\b[^>]*>[\s\S]*?<\/thinking>"></textarea></label>
+            <label>flags<input id="wo-ch-query-flags" class="text_pole" value="gi" placeholder="gi"></label>
+            <label>替换为（留空即删除）<textarea id="wo-ch-query-replacement" class="text_pole fm-code" rows="2" spellcheck="false"></textarea></label>
+            <div class="fm-actions"><button type="submit" class="menu_button">保存查询清洗</button><button id="wo-ch-query-test" type="button" class="menu_button">预览当前查询（已保存规则）</button></div>
+          </form>
+          <pre id="wo-ch-query-preview" class="fm-output"></pre>
+        </details>
         <div class="fm-actions"><button id="wo-ch-debug-refresh" type="button" class="menu_button">刷新</button><button id="wo-ch-copy-macro" type="button" class="menu_button">复制 {{character}}</button></div>
         <div id="wo-ch-debug"></div>
       </div>

@@ -1,6 +1,6 @@
 # world os 发布与更新
 
-当前版本 0.7.0，包含 world os 应用首页、楼层记忆、日历、角色目录、CG、Token 计数、默认状态模板、总开关与状态快照。仓库由 floor-memory 改名为 world-os，保留原有提交历史和 GitHub 重定向。已安装的 floor-memory 使用原位置更新；新链接安装的目录名为 world-os，运行文件支持两种目录。
+当前版本 0.7.1，包含 world os 应用首页、楼层记忆、日历、角色目录、CG、Token 计数、默认状态模板、角色查询清洗、总开关与状态快照。仓库由 floor-memory 改名为 world-os，保留原有提交历史和 GitHub 重定向。已安装的 floor-memory 使用原位置更新；新链接安装的目录名为 world-os，运行文件支持两种目录。
 
 仓库：**https://github.com/dkr54/world-os**
 默认分支：**main**
@@ -74,7 +74,7 @@ git push origin main
 
 1. 运行 `powershell -NoProfile -File ./build-package.ps1`。
 2. 安装包内部继续使用 floor-memory 目录，供旧安装覆盖升级；不要在已有 world-os 目录的安装中重复导入另一份。脚本生成并校验两个包：`world-os-版本.zip` 和 `world-os-tauritavern-版本.zip`。
-3. 在 GitHub 的 **Releases → Draft a new release** 中创建对应版本标签（如 `v0.7.0`），附上说明和两个 ZIP 后发布。
+3. 在 GitHub 的 **Releases → Draft a new release** 中创建对应版本标签（如 `v0.7.1`），附上说明和两个 ZIP 后发布。
 4. 使用 GitHub 链接安装的用户从 `main` 获取更新；Release ZIP 供离线／手动安装使用。
 
 源码上传时保留 `.gitignore`：临时浏览器数据、参考源码、ZIP 和本地环境文件已排除。API Key 由用户在宿主设置中填写。

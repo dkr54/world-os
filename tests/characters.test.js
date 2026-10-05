@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CHARACTERS_KEY, validateCharacter, validateDirectory, validateState, currentState, selectCharacters, recentCharacterQuery,
-    defaultCharacterState, saveDefaultCharacterState, DEFAULT_CHARACTER_STATE, renderCharacter, applyStateOperations, stateDifference, relationshipsOf, sortedCharacters, safeJSON, getStateValue } from '../characters-core.js';
+    defaultCharacterState, saveDefaultCharacterState, DEFAULT_CHARACTER_STATE, validateCharacterQueryCleanup, renderCharacter, applyStateOperations, stateDifference, relationshipsOf, sortedCharacters, safeJSON, getStateValue } from '../characters-core.js';
 import { validateStateAPI, stateMessages, parseStateResponse, requestStateUpdate } from '../character-api.js';
 import { CharacterEngine } from '../characters-engine.js';
 import { createSnapshot, restoreSnapshot, validateSnapshot } from '../snapshots.js';
 import { WORLD_KEY } from '../world-state.js';
 import { CALENDAR_KEY, holidayPrompt, validateCalendar } from '../calendar-core.js';
-import { DEFAULT_SETTINGS, MODULE_KEY } from '../core.js';
+import { DEFAULT_SETTINGS, MODULE_KEY, processRegexRequest } from '../core.js';
 
 const person = changes => validateCharacter({ id:'a',name:'示例角色甲',keywords:'示例角色甲,角色甲',avatar:'',description:'年龄 {{age}}；好感 {{affection}}；关系 {{relationship.苏岚}}',
     baseState:{ age:20,affection:0,relationship:[{ 苏岚:'初识' }] },stages:[],policies:[],...changes });
@@ -293,4 +293,70 @@ test('状态快照保存恢复默认模板，兼容旧快照并拒绝非法模�
     await restoreSnapshot(legacy,ctx);assert.deepEqual(defaultCharacterState(ctx),DEFAULT_CHARACTER_STATE);
     const bad=structuredClone(snapshot);bad.settings[CHARACTERS_KEY].defaultStates['character:card.png']={relationship:123};
     assert.throws(()=>validateSnapshot(bad),/relationship/);
+});
+
+
+const queryRule = { pattern:'<(thinking|ui)\\b[^>]*>[\\s\\S]*?<\\/\\1>',flags:'gi',replacement:'' };
+const queryRegex = { run:async(texts,settings,signal,operation)=>{
+    assert.equal(operation,'keywords');assert.equal(signal.aborted,false);
+    const result=processRegexRequest({texts,settings,operation});
+    if(result.error)throw Error(result.error);
+    return result.results;
+} };
+test('未配置查询清洗时沿用原文匹配，不启动工作线程；单条及空查询保持原逻辑',()=>{
+    const ctx=context();ctx.chat=[{mes:'<thinking>示例角色甲</thinking>',is_user:false}];
+    const engine=new CharacterEngine({getContext:()=>ctx,regex:{run:()=>{throw Error('unexpected worker');}}});
+    engine.start();assert.equal(engine.prepare(),undefined);
+    assert.equal(engine.run.selection.items.length,1);assert.equal(engine.run.selection.query,ctx.chat[0].mes);
+    ctx.chat=[];engine.start();engine.prepare();assert.equal(engine.run.selection.items.length,0);
+    engine.cancel();
+});
+test('先清洗最近两条消息再匹配角色，character 和 CG 同源，原聊天与楼层记忆配置不变',async()=>{
+    const ctx=context([person({cgId:0,cgs:[{name:'晨光',src:'https://example.com/a.png'}]}),person({id:'b',cgId:1,name:'苏岚',keywords:'苏岚'})]);
+    ctx.chat=[{mes:'更早消息提到苏岚'},{mes:'<THINKING>苏岚的隐藏想法</THINKING><ui class="panel">苏岚</ui>示例角色甲在眼前。'},{mes:'继续',is_user:true}];
+    ctx.extensionSettings[CHARACTERS_KEY].queryCleanup=queryRule;
+    const before=JSON.stringify(ctx.chat),memory=JSON.stringify(ctx.extensionSettings[MODULE_KEY]);
+    let calls=0;const engine=new CharacterEngine({getContext:()=>ctx,regex:{run:(...args)=>{calls++;return queryRegex.run(...args);}}});
+    engine.start();await engine.prepare();
+    assert.equal(engine.run.selection.query,'示例角色甲在眼前。\n\n继续');assert.deepEqual(engine.run.selection.items.map(p=>p.id),['a']);
+    assert(engine.macro().includes('<示例角色甲>'));assert(!engine.macro().includes('<苏岚>'));
+    assert.equal(engine.macro('CG'),'<0_示例角色甲>\n{{0.晨光}}\n</0_示例角色甲>');
+    assert.equal(JSON.stringify(ctx.chat),before);assert.equal(JSON.stringify(ctx.extensionSettings[MODULE_KEY]),memory);
+    engine.confirmPrompt({chat:[{role:'system',content:engine.macro()}]});assert.deepEqual(engine.run.called,['a']);
+    engine.macro();engine.queryText();assert.equal(calls,1,'unchanged query should reuse cleanup result');
+    engine.cancel();
+});
+test('清洗支持替换文本与捕获组；清洗为空不命中，swipe 排除旧回复',async()=>{
+    const ctx=context();ctx.extensionSettings[CHARACTERS_KEY].queryCleanup={pattern:'/人物:(\\w+)/g',flags:'',replacement:'示例角色甲'};
+    ctx.chat=[{mes:'人物:A',is_user:true},{mes:'旧回复'}];
+    const engine=new CharacterEngine({getContext:()=>ctx,regex:queryRegex});
+    engine.start('swipe');await engine.prepare('swipe');assert.equal(engine.run.selection.query,'示例角色甲');
+    ctx.extensionSettings[CHARACTERS_KEY].queryCleanup={pattern:'[\\s\\S]+',flags:'g',replacement:''};
+    engine.changed();engine.start();await engine.prepare();assert.equal(engine.macro(),'');assert.equal(engine.macro('CG'),'');
+    engine.cancel();
+});
+test('查询清洗失败不回退原文误命中，规则校验不接受非法 JSON 类型或正则',async()=>{
+    for(const value of [null,[],{pattern:123},{pattern:'(',flags:'g'},{pattern:'x',flags:'gg'}])assert.throws(()=>validateCharacterQueryCleanup(value));
+    const ctx=context();ctx.chat=[{mes:'示例角色甲'}];ctx.extensionSettings[CHARACTERS_KEY].queryCleanup=queryRule;
+    const errors=[],engine=new CharacterEngine({getContext:()=>ctx,regex:{run:async()=>{throw Error('正则处理超时');}},onChange:error=>{if(error)errors.push(error);}});
+    engine.start();await engine.prepare();
+    assert.deepEqual(engine.run.selection.items,[]);assert.equal(engine.macro(),'');assert(engine.run.queryError.includes('超时'));
+    assert.equal(errors.length,1);assert(!ctx.chatMetadata[CHARACTERS_KEY]);engine.cancel();
+});
+test('清洗未完成时不会使用原文注入，切换聊天或取消丢弃迟到结果',async()=>{
+    let ctx=context(),resolve,signal;ctx.chat=[{mes:'示例角色甲'}];ctx.extensionSettings[CHARACTERS_KEY].queryCleanup=queryRule;
+    const engine=new CharacterEngine({getContext:()=>ctx,regex:{run:(_text,_settings,s)=>{signal=s;return new Promise(r=>{resolve=r;});}}});
+    engine.start();const pending=engine.prepare();assert.equal(engine.macro(),'');
+    await new Promise(r=>setTimeout(r,0));
+    ctx={...ctx,chatId:'new',chatMetadata:{}};engine.changed();assert(signal.aborted);
+    resolve([{cleaned:'示例角色甲'}]);await pending;assert.equal(engine.run,null);assert.equal(engine.queryCache,null);
+});
+test('快照包含独立查询清洗配置，旧快照兼容，坏规则在恢复前拒绝',async()=>{
+    const ctx=context();ctx.extensionSettings[CHARACTERS_KEY].queryCleanup=queryRule;
+    const snapshot=createSnapshot(ctx);delete ctx.extensionSettings[CHARACTERS_KEY].queryCleanup;
+    await restoreSnapshot(snapshot,ctx);assert.deepEqual(ctx.extensionSettings[CHARACTERS_KEY].queryCleanup,queryRule);
+    const invalid=structuredClone(snapshot);invalid.settings[CHARACTERS_KEY].queryCleanup={pattern:'(',flags:'g'};
+    assert.throws(()=>validateSnapshot(invalid),/清洗正则/);
+    delete snapshot.settings[CHARACTERS_KEY].queryCleanup;
+    assert.equal(validateSnapshot(snapshot).settings[CHARACTERS_KEY].queryCleanup,undefined);
 });

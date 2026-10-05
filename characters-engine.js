@@ -1,8 +1,9 @@
 import { calendarChat } from './calendar-core.js';
-import { CHARACTERS_KEY, cloneJSON, directoryOf, currentState, selectCharacters, applyStateOperations } from './characters-core.js';
+import { CHARACTERS_KEY, cloneJSON, directoryOf, currentState, selectCharacters, applyStateOperations, recentCharacterQuery, validateCharacterQueryCleanup } from './characters-core.js';
 import { DEFAULT_STATE_API, validateStateAPI, requestStateUpdate } from './character-api.js';
 import { cgCharacterPrompt } from './character-cg.js';
 import { worldEnabled, WORLD_EVENT } from './world-state.js';
+import { RegexRunner } from './regex-runner.js';
 
 // Image bytes do not affect state permissions. Avoid repeatedly serializing the CG gallery during updates.
 const definitionSignature = items => JSON.stringify(items.map(({ avatar,cgs,...item }) => ({ ...item,cgNames:(cgs ?? []).map(cg => cg.name) })));
@@ -10,15 +11,43 @@ const replySignature = message => JSON.stringify([message?.mes, message?.swipe_i
 const realReply = message => message && !message.is_user && !message.is_system && message.role !== 'tool'
     && !message.extra?.tool_invocations?.length && !message.tool_calls?.length && typeof message.mes === 'string' && message.mes.trim();
 export class CharacterEngine {
-    constructor({ getContext, onChange = () => {}, request = requestStateUpdate, getKey = config => config.apiKey }) {
+    constructor({ getContext, onChange = () => {}, request = requestStateUpdate, getKey = config => config.apiKey, regex = new RegexRunner() }) {
         this.getContext = getContext; this.onChange = onChange; this.request = request; this.getKey = getKey;
         this.run = null; this.job = null; this.timer = null; this.lastReport = null;
+        this.regex = regex; this.queryCache = null;
     }
     api() { return validateStateAPI(this.getContext().extensionSettings?.[CHARACTERS_KEY]?.api ?? DEFAULT_STATE_API); }
-    cancel() { if (this.job && this.lastReport) this.lastReport.status = '操作已取消，AI 结果未写入。'; this.job?.abort(); this.job = null; clearTimeout(this.timer); this.run = null; }
+    cancel(clearQuery = true) {
+        if (this.job && this.lastReport) this.lastReport.status = '操作已取消，AI 结果未写入。';
+        this.job?.abort(); this.job = null; clearTimeout(this.timer); this.run = null;
+        if (clearQuery) { this.queryCache?.controller?.abort(); this.queryCache = null; }
+    }
+    queryText(chat = this.getContext().chat) {
+        const ctx = this.getContext(), raw = recentCharacterQuery(chat), settings = ctx.extensionSettings?.[CHARACTERS_KEY]?.queryCleanup;
+        // Preserve the original synchronous path when this optional feature is not configured.
+        if (!settings?.pattern) return { raw,query:raw,pending:false,error:'' };
+        const key = JSON.stringify([calendarChat(ctx),raw,settings]);
+        if (this.queryCache?.key === key && this.queryCache.metadata === ctx.chatMetadata) return this.queryCache;
+        this.queryCache?.controller?.abort();
+        const entry = { key,metadata:ctx.chatMetadata,raw,query:'',pending:true,error:'',controller:new AbortController() };
+        this.queryCache = entry;
+        entry.promise = Promise.resolve().then(() => {
+            const rule = validateCharacterQueryCleanup(settings);
+            return this.regex.run([raw],{ aiKeywordCleanupRules:[rule] },entry.controller.signal,'keywords');
+        }).then(([result]) => {
+            if (typeof result?.cleaned !== 'string') throw new Error('正则未返回清洗后的文本。');
+            entry.query = result.cleaned;
+        }).catch(error => {
+            if (error.name !== 'AbortError') entry.error = '角色查询清洗失败，本次不注入角色：' + error.message;
+        }).finally(() => {
+            entry.pending = false;
+            if (this.queryCache === entry) this.onChange(entry.error || undefined);
+        });
+        return entry;
+    }
     changed() { this.cancel(); this.lastReport = null; this.onChange(); }
     start(type = 'normal', _options, dryRun = false) {
-        this.cancel();
+        this.cancel(false);
         if (dryRun || ['quiet','impersonate'].includes(type) || !worldEnabled(this.getContext()) || !calendarChat(this.getContext())) return;
         const ctx = this.getContext();
         this.run = { type, scope:calendarChat(ctx), metadata:ctx.chatMetadata,
@@ -30,8 +59,16 @@ export class CharacterEngine {
         if (!run || !this.validRun(run) || ['quiet','impersonate'].includes(type)) return;
         // The host's real chat still has its raw messages here; floor-memory projection has not run yet.
         const chat = type === 'swipe' ? ctx.chat.slice(0,-1) : ctx.chat;
-        run.selection = selectCharacters(ctx,chat);
-        run.prepared = true; run.expanded = false; run.cgExpanded = false; run.confirmed = false; run.called = [];
+        const query = this.queryText(chat);
+        const apply = () => {
+            if (!this.validRun(run) || query.controller?.signal.aborted
+                || recentCharacterQuery(type === 'swipe' ? this.getContext().chat.slice(0,-1) : this.getContext().chat) !== query.raw) return;
+            run.selection = selectCharacters(this.getContext(),chat,query.query);
+            run.queryError = query.error;
+            run.prepared = true; run.expanded = false; run.cgExpanded = false; run.confirmed = false; run.called = [];
+        };
+        if (query.pending) return query.promise.then(apply);
+        apply();
     }
     validRun(run) {
         const ctx = this.getContext();
@@ -42,12 +79,17 @@ export class CharacterEngine {
         if (!worldEnabled(ctx) || !calendarChat(ctx)) return '';
         const run = this.run;
         if (run && !run.ended && !run.done && this.validRun(run)) {
-            if (!run.prepared) this.prepare(run.type);
+            if (!run.prepared) {
+                const pending = this.prepare(run.type);
+                if (!run.prepared) { pending?.catch(error => this.onChange(error.message)); return ''; }
+            }
             if (kind === 'CG') { run.cgExpanded = true; return run.selection.cgContent; }
             run.expanded = true; return run.selection.content;
         }
         // Host previews may expand macros outside a real generation. They never arm auto updates.
-        const selection = selectCharacters(ctx);
+        const query = this.queryText();
+        if (query.pending) return '';
+        const selection = selectCharacters(ctx,ctx.chat,query.query);
         return kind === 'CG' ? selection.cgContent : selection.content;
     }
     confirmPrompt(data, dryRun = false) {
@@ -55,7 +97,10 @@ export class CharacterEngine {
         if (!run || !this.validRun(run) || data?.dryRun || dryRun) return;
         const prompt = data?.chat ?? data?.messages ?? data?.prompt;
         if (prompt === undefined) return;
-        if (!run.prepared) this.prepare(run.type);
+        if (!run.prepared) {
+            const pending = this.prepare(run.type);
+            if (!run.prepared) { pending?.catch(error => this.onChange(error.message)); return; }
+        }
         const text = typeof prompt === 'string' ? prompt : JSON.stringify(prompt);
         run.called = run.selection.items.filter(item => {
             const tag = item.tag ?? item.name;
@@ -97,7 +142,7 @@ export class CharacterEngine {
         const previous = Object.fromEntries(definitions.map(item => [item.id,currentState(ctx,item)]));
         const report = { time:new Date().toISOString(), mode:'auto', query:run.selection.query, reply:run.received.mes,
             matched:run.selection.items.filter(item => ids.includes(item.id)).map(({ id,name,stage }) => ({ id,name,stage })),
-            previous, current:cloneJSON(previous), accepted:[], ignored:[], status:ids.length ? '本轮已调用角色，自动更新关闭。' : '本轮没有角色设定进入最终上下文。' };
+            previous, current:cloneJSON(previous), accepted:[], ignored:[], status:run.queryError || (ids.length ? '本轮已调用角色，自动更新关闭。' : '本轮没有角色设定进入最终上下文。') };
         this.lastReport = report; this.onChange();
         try {
             if (definitions.length && this.api().auto) await this.update(definitions,report,run);
@@ -183,7 +228,10 @@ export class CharacterEngine {
         for (const name of ['MESSAGE_EDITED','MESSAGE_DELETED','MESSAGE_SWIPED']) listen(name,() => {
             if (this.job) this.job.abort();
         });
-        document.addEventListener(WORLD_EVENT,() => this.changed());
+        const warmQuery = () => { if (worldEnabled(this.getContext()) && calendarChat(this.getContext())) this.queryText(); };
+        for (const name of ['CHAT_CHANGED','CHAT_LOADED','CHARACTER_SELECTED','MESSAGE_SENT','MESSAGE_RECEIVED','MESSAGE_UPDATED','MESSAGE_EDITED','MESSAGE_DELETED','MESSAGE_SWIPED','CHARACTER_MESSAGE_RENDERED']) listen(name,warmQuery);
+        document.addEventListener(WORLD_EVENT,() => { this.changed(); warmQuery(); });
+        warmQuery();
         return this;
     }
 }

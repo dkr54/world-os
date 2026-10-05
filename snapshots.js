@@ -1,6 +1,6 @@
 import { MODULE_KEY, normalizeSettings } from './core.js';
 import { CALENDAR_KEY, calendarOwner, calendarChat, validateCalendar, validateDate, DEFAULT_CALENDAR } from './calendar-core.js';
-import { CHARACTERS_KEY, safeJSON, plainObject, cloneJSON, validateDirectory, validateState } from './characters-core.js';
+import { CHARACTERS_KEY, safeJSON, plainObject, cloneJSON, validateDirectory, validateState, validateCharacterQueryCleanup } from './characters-core.js';
 import { validateCGFloors } from './character-cg.js';
 import { validateStateAPI } from './character-api.js';
 import { WORLD_KEY, announceWorldChange } from './world-state.js';
@@ -64,6 +64,7 @@ export function validateSnapshot(input) {
             directory.nextIds[key] = Math.max(directory.nextIds[key] ?? 0,...directory.cards[key].map(item => item.cgId + 1));
         }
         if (directory.api !== undefined) validateStateAPI(directory.api);
+        if (directory.queryCleanup !== undefined) directory.queryCleanup = validateCharacterQueryCleanup(directory.queryCleanup);
     }
     const date = data.metadata[CALENDAR_KEY];
     if (date !== null) validateDate(date.date,validateCalendar(calendar?.cards?.[data.owner] ?? DEFAULT_CALENDAR).months);

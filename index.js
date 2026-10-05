@@ -213,7 +213,7 @@ globalThis.floorMemoryInterceptor = async (prompt, _contextSize, abort, type = '
     let job;
     try {
         if (!worldEnabled(context())) return;
-        characterApp?.engine.prepare(type);
+        await characterApp?.engine.prepare(type);
         if (!settings().enabled || ['quiet', 'impersonate'].includes(type) || !scopeOf()) return;
         job = beginJob();
         activeGeneration = true;

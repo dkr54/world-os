@@ -1,7 +1,7 @@
 import { calendarOwner, calendarChat } from './calendar-core.js';
 import { CHARACTERS_KEY, cloneJSON, directoryOf, currentState, validateCharacter, validateDirectory, validateState,
     sortedCharacters, characterInitial, renderCharacter, stateFields, valueType, relationshipsOf, stateDifference, CONDITION_OPS,
-    ensureCharacterIDs, nextCharacterID, characterTag, characterTokenCount, DEFAULT_CHARACTER_STATE, defaultCharacterState, saveDefaultCharacterState } from './characters-core.js';
+    ensureCharacterIDs, nextCharacterID, characterTag, characterTokenCount, DEFAULT_CHARACTER_STATE, defaultCharacterState, saveDefaultCharacterState, validateCharacterQueryCleanup } from './characters-core.js';
 import { DEFAULT_STATE_API, DEFAULT_STATE_PROMPTS, validateStateAPI, requestStateUpdate } from './character-api.js';
 import { CharacterEngine } from './characters-engine.js';
 import { requestModels } from './embeddings.js';
@@ -284,11 +284,17 @@ export function mountCharacters(root, { getContext }) {
         graph.append(svg);
         if (!edges.length) list.append(el('p','fm-hint','还没有关系。可在角色状态中加入 relationship，例如 [{"苏岚":"朋友"}]。'));
     }
+    function fillQueryCleanup() {
+        const rule = validateCharacterQueryCleanup(getContext().extensionSettings?.[CHARACTERS_KEY]?.queryCleanup);
+        for (const name of ['pattern','flags','replacement']) find('query-' + name).value = rule[name];
+        find('query-preview').textContent = '';
+    }
     function renderDebug() {
         const box = find('debug'); if (!box) return; box.replaceChildren();
         const report = engine.report(), run = engine.run;
         if (run && !run.done && run.selection) box.append(el('p','fm-hint','本次生成：关键词命中 ' + (run.selection.items.map(item => item.name).join('、') || '无')
             + '；实际进入上下文 ' + (run.confirmed ? (run.called.map(id => run.selection.items.find(item => item.id === id)?.name).join('、') || '无') : '等待最终提示词确认')));
+        if (run?.selection) box.append(el('pre','fm-output','本次实际匹配查询文本：\n' + run.selection.query));
         if (!report) { box.append(el('p','wo-ch-empty','还没有真实回复的状态记录。配置角色并在预设加入 {{character}} 后发送消息。')); return; }
         box.append(el('p','',report.status),el('p','fm-hint',new Date(report.time).toLocaleString() + ' · ' + (report.mode === 'auto' ? '回复后记录' : '手动更新')),
             el('p','', '本轮角色：' + (report.matched.map(item => item.name + '（' + item.stage + '）').join('、') || '无')));
@@ -420,6 +426,24 @@ export function mountCharacters(root, { getContext }) {
         await engine.manual([selected],find('manual-requirements').value); refreshState(true); say(engine.report().status);
     }));
     for (const tab of page.querySelectorAll('[data-ch-tab]')) tab.addEventListener('click',() => setView(tab.dataset.chTab));
+    find('query-form').addEventListener('submit',event => { event.preventDefault(); void action(() => {
+        const rule = validateCharacterQueryCleanup(Object.fromEntries(['pattern','flags','replacement'].map(name => [name,find('query-' + name).value])));
+        const ctx = getContext();
+        engine.changed();
+        ctx.extensionSettings[CHARACTERS_KEY] = { ...ctx.extensionSettings[CHARACTERS_KEY],queryCleanup:rule };
+        ctx.saveSettingsDebounced(); find('query-preview').textContent = '';
+        engine.queryText();
+        say(rule.pattern ? '角色查询清洗已保存：先清洗最近两条消息组成的查询文本，再匹配角色关键词。' : '已关闭角色查询清洗，恢复原文匹配。');
+    }); });
+    find('query-test').addEventListener('click',() => void action(async () => {
+        const ctx = getContext(), query = engine.queryText();
+        await query.promise;
+        const current = engine.queryText();
+        if (ctx.chatMetadata !== getContext().chatMetadata || calendarChat(ctx) !== calendarChat(getContext())
+            || query.controller?.signal.aborted || query.raw !== current.raw || query.key !== current.key) throw new DOMException('查询已变化','AbortError');
+        if (query.error) throw new Error(query.error);
+        find('query-preview').textContent = query.query || '（查询文本为空，不会命中角色。）';
+    }));
     find('debug-refresh').addEventListener('click',renderDebug);
     find('copy-macro').addEventListener('click',() => void action(async () => {
         if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText('{{character}}'); say('已复制 {{character}}。'); }
@@ -458,8 +482,8 @@ export function mountCharacters(root, { getContext }) {
     root.addEventListener('world-os:page',event => { if (event.detail.name === 'characters') refresh(); });
     const ctx = getContext();
     for (const name of ['CHAT_CHANGED','CHAT_LOADED','CHARACTER_SELECTED']) if (ctx.eventTypes[name]) ctx.eventSource.on(ctx.eventTypes[name],refresh);
-    document.addEventListener(WORLD_EVENT,event => { refresh(); if (event.detail?.kind === 'restore') { selected = ''; setView('list'); fillAPI(); } });
+    document.addEventListener(WORLD_EVENT,event => { refresh(); if (event.detail?.kind === 'restore') { selected = ''; setView('list'); fillAPI(); fillQueryCleanup(); } });
     for (const name of ['ONLINE_STATUS_CHANGED','CHATCOMPLETION_MODEL_CHANGED','PRESET_CHANGED']) if (ctx.eventTypes[name]) ctx.eventSource.on(ctx.eventTypes[name],() => { if (view === 'detail') refreshState(false); });
-    fillAPI(); renderList(); engine.mount();
+    fillAPI(); fillQueryCleanup(); renderList(); engine.mount();
     return { engine,refresh };
 }

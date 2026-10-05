@@ -320,7 +320,7 @@ try {
             if (view === 'character-detail') await send('Runtime.evaluate',{expression:"document.querySelector('#wo-ch-list .wo-ch-contact').click();document.querySelector('.wo-window-body').scrollTop=0;",returnByValue:true});
             if (view === 'relationships') await send('Runtime.evaluate',{expression:"document.querySelector('[data-ch-tab=\"relations\"]').click();",returnByValue:true});
             if (view === 'character-api') await send('Runtime.evaluate',{expression:"document.querySelector('[data-ch-tab=\"api\"]').click();",returnByValue:true});
-            if (view === 'character-debug') await send('Runtime.evaluate',{expression:"document.querySelector('[data-ch-tab=\"debug\"]').click();",returnByValue:true});
+            if (view === 'character-debug') await send('Runtime.evaluate',{expression:"document.querySelector('[data-ch-tab=\"debug\"]').click();document.querySelector('#wo-ch-query-form').closest('details').open=true;",returnByValue:true});
             if (view === 'snapshot') await send('Runtime.evaluate',{expression:"document.querySelector('#wo-open-snapshot').click();",returnByValue:true});
             if (view === 'character-defaults') await send('Runtime.evaluate',{expression:"globalThis.__showDefaultStateFixture()",returnByValue:true});
             if (view === 'character-cg') await send('Runtime.evaluate',{expression:"globalThis.__showCGFixture()",returnByValue:true});

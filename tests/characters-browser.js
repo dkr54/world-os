@@ -188,6 +188,47 @@ export async function runCharacterChecks({ check, assert, waitFor, delay, emit, 
         const body=q('world-os').querySelector('.wo-window-body');assert(body.scrollWidth<=body.clientWidth+1,'default JSON editor overflow');
         setContext(ctx);emit('CHAT_CHANGED');tab('list');
     });
+    await check('调试页查询清洗先于角色与 CG 宏匹配，发送准备等待后台正则，原始聊天不变',async()=>{
+        const rawAI='<thinking>苏岚正在别处</thinking><ui>苏岚的状态面板</ui>示例角色甲向你挥手。';
+        ctx.chat=[{mes:'旧消息 第二位',is_user:true},{mes:rawAI,is_user:false},{mes:'我走过去。',is_user:true}];
+        emit('CHAT_CHANGED');tab('debug');
+        assert(macros.get('character')().includes('<苏岚>'),'blank rule changed existing raw matching');
+        const before=JSON.stringify(ctx.chat),memory=JSON.stringify(ctx.extensionSettings.floor_memory);
+        q('wo-ch-query-pattern').closest('details').open=true;
+        q('wo-ch-query-pattern').value=String.raw`<(thinking|ui)\b[^>]*>[\s\S]*?<\/\1>`;
+        q('wo-ch-query-flags').value='gi';q('wo-ch-query-replacement').value='';
+        await submit('wo-ch-query-form');
+        q('wo-ch-query-test').click();
+        await waitFor(()=>q('wo-ch-query-preview').textContent==='示例角色甲向你挥手。\n\n我走过去。','clean query preview');
+        // Change the text just before generation to exercise the interceptor's async preparation.
+        ctx.chat[2].mes='我走过去打招呼。';
+        emit('GENERATION_STARTED','normal',{},false);
+        await globalThis.floorMemoryInterceptor(ctx.chat.map((message,index)=>({...message,index})),32000,()=>{throw Error('cleanup aborted generation');},'normal');
+        const content=macros.get('character')(),cg=macros.get('CG')();
+        assert(content.includes('<示例角色甲>')&&!content.includes('<苏岚>'),'hidden text still matched role');
+        assert(cg.includes('{{0.晨光}}')&&!cg.includes('{{2.晨光}}'),'CG did not share cleaned selection');
+        emit('CHAT_COMPLETION_PROMPT_READY',{chat:[{role:'system',content:content+'\n'+cg}],dryRun:false});
+        assert(q('wo-ch-debug').textContent.includes('本次实际匹配查询文本：\n示例角色甲向你挥手。\n\n我走过去打招呼。'),'debug missing actual cleaned query');
+        ctx.chat[2].mes='我走过去。';
+        assert(JSON.stringify(ctx.chat)===before,'query cleaning modified raw chat');
+        assert(JSON.stringify(ctx.extensionSettings.floor_memory)===memory,'query cleaning changed floor-memory config');
+        const snapshot=validateSnapshot(createSnapshot(ctx));
+        assert(snapshot.settings[CHARACTERS_KEY].queryCleanup.pattern===q('wo-ch-query-pattern').value,'snapshot lost cleanup rule');
+        const body=q('world-os').querySelector('.wo-window-body');assert(body.scrollWidth<=body.clientWidth+1,'cleanup controls overflow mobile view');
+        emit('GENERATION_STOPPED');
+    });
+    await check('查询正则无效时拒绝保存，清空后恢复原有匹配；预览按保存规则执行',async()=>{
+        const saved=JSON.stringify(ctx.extensionSettings[CHARACTERS_KEY].queryCleanup);
+        q('wo-ch-query-pattern').value='(';await submit('wo-ch-query-form');
+        assert(status().includes('角色查询清洗正则'),'invalid regex not reported');
+        assert(JSON.stringify(ctx.extensionSettings[CHARACTERS_KEY].queryCleanup)===saved,'invalid regex overwrote saved rule');
+        q('wo-ch-query-preview').textContent='';q('wo-ch-query-test').click();
+        await waitFor(()=>q('wo-ch-query-preview').textContent==='示例角色甲向你挥手。\n\n我走过去。','preview saved rule');
+        q('wo-ch-query-pattern').value='';await submit('wo-ch-query-form');
+        assert(macros.get('character')().includes('<苏岚>'),'clearing regex did not restore original behavior');
+        q('wo-ch-query-test').click();await waitFor(()=>q('wo-ch-query-preview').textContent.includes('<thinking>'),'disabled cleanup preview');
+        q('wo-ch-query-pattern').closest('details').open=false;
+    });
     globalThis.__showDefaultStateFixture=()=>{
         setContext(ctx);emit('CHAT_CHANGED');if(!q('world-os').open)q('wo-launcher').click();q('wo-open-characters').click();tab('list');q('wo-ch-defaults-open').click();
     };
