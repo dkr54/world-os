@@ -1,5 +1,6 @@
 import { calendarOwner, calendarChat } from './calendar-core.js';
 import { normalizeText, splitKeywords } from './core.js';
+import { validateCGs, isCGMacro, cgPrompt } from './character-cg.js';
 
 export const CHARACTERS_KEY = 'world_os_characters';
 export const cloneJSON = value => JSON.parse(JSON.stringify(value));
@@ -37,6 +38,19 @@ export function validateState(value) {
         }
     }
     return state;
+}
+export const DEFAULT_CHARACTER_STATE = Object.freeze({ age:20,heigh:'165cm',affection:0,relationship:Object.freeze([]) });
+export function defaultCharacterState(ctx) {
+    const owner = calendarOwner(ctx);
+    const template = ctx.extensionSettings?.[CHARACTERS_KEY]?.defaultStates?.[owner] ?? DEFAULT_CHARACTER_STATE;
+    return validateState(template);
+}
+export function saveDefaultCharacterState(ctx, value) {
+    const owner = calendarOwner(ctx);
+    if (!owner) throw new Error('请先打开角色卡，再设置默认状态。');
+    const template = validateState(value), config = ctx.extensionSettings[CHARACTERS_KEY] ?? {};
+    ctx.extensionSettings[CHARACTERS_KEY] = { ...config,defaultStates:{ ...config.defaultStates,[owner]:template } };
+    ctx.saveSettingsDebounced();
 }
 export function statePath(path) {
     if (typeof path !== 'string' || !path || path.length > 500) throw new Error('状态路径无效。');
@@ -93,12 +107,12 @@ export function renderCharacter(character, state) {
     const template = [character.description, stage?.content].filter(Boolean).join('\n\n');
     const content = template.replace(/\{\{([^{}]+)\}\}/g, (match, path) => {
         path = path.trim();
-        if (['user', 'char'].includes(path)) return match;
+        if (['user', 'char'].includes(path) || isCGMacro(match)) return match;
         let value;
         try { value = getStateValue(state, path); } catch { return ''; }
         return value === undefined ? '' : typeof value === 'string' ? value : JSON.stringify(value);
     });
-    return { id:character.id, name:character.name, stage:stage?.name ?? '基础设定', content, state:cloneJSON(state) };
+    return { id:character.id, cgId:character.cgId, cgs:character.cgs ?? [], name:character.name, stage:stage?.name ?? '基础设定', content, state:cloneJSON(state) };
 }
 export function validateCharacter(input) {
     const value = safeJSON(input);
@@ -112,6 +126,8 @@ export function validateCharacter(input) {
         if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new Error('头像地址不支持此格式。');
     }
     if (avatar.length > 2000000) throw new Error('头像过大，请使用较小的图片。');
+    if (value.cgId !== undefined && value.cgId !== null && (!Number.isSafeInteger(value.cgId) || value.cgId < 0 || value.cgId >= Number.MAX_SAFE_INTEGER)) throw new Error('角色数字 ID 必须是非负安全整数。');
+    const cgs = validateCGs(value.cgs);
     const baseState = validateState(value.baseState ?? {});
     const policies = value.policies ?? [];
     const seen = new Set();
@@ -137,21 +153,73 @@ export function validateCharacter(input) {
             if (!['exists', 'missing'].includes(condition.op)) safeJSON(condition.value);
         }
     }
-    return { id:value.id, name, sortName:String(value.sortName ?? '').trim(), avatar,
+    return { id:value.id, cgId:value.cgId ?? null, cgs, name, sortName:String(value.sortName ?? '').trim(), avatar,
         keywords:splitKeywords(String(value.keywords ?? '')), description:String(value.description ?? ''),
         baseState, policies:cloneJSON(policies), stages:cloneJSON(stages), enabled:value.enabled !== false };
 }
-export function validateDirectory(value) {
+export function validateDirectory(value, firstId = 0) {
     if (!Array.isArray(value) || value.length > 1000) throw new Error('角色目录最多支持 1000 个角色。');
-    const ids = new Set(), names = new Set();
-    return value.map(item => {
+    const ids = new Set(), numbers = new Set();
+    const characters = value.map(item => {
         const character = validateCharacter({ ...item, keywords:Array.isArray(item.keywords) ? item.keywords.join(',') : item.keywords });
-        if (ids.has(character.id) || names.has(character.name)) throw new Error('同一张角色卡下不能有重复的角色名或标识。');
-        ids.add(character.id); names.add(character.name);
+        if (ids.has(character.id)) throw new Error('同一张角色卡下不能有重复的角色标识。');
+        ids.add(character.id);
+        if (character.cgId !== null) {
+            if (numbers.has(character.cgId)) throw new Error('角色数字 ID 不能重复。');
+            numbers.add(character.cgId);
+        }
         return character;
     });
+    let next = Math.max(firstId,...characters.map(item => (item.cgId ?? -1) + 1));
+    for (const character of characters) if (character.cgId === null) {
+        if (!Number.isSafeInteger(next) || next >= Number.MAX_SAFE_INTEGER) throw new Error('角色数字 ID 已超出范围。');
+        character.cgId = next++;
+    }
+    return characters;
 }
-export function directoryOf(ctx) { return ctx.extensionSettings?.[CHARACTERS_KEY]?.cards?.[calendarOwner(ctx)] ?? []; }
+export function nextCharacterID(ctx) {
+    const owner = calendarOwner(ctx), config = ctx.extensionSettings?.[CHARACTERS_KEY];
+    return Math.max(config?.nextIds?.[owner] ?? 0,...(config?.cards?.[owner] ?? []).map(item => (item.cgId ?? -1) + 1));
+}
+/** Upgrade legacy definitions once without changing internal IDs or per-chat state keys. */
+export function ensureCharacterIDs(ctx) {
+    const config = ctx.extensionSettings?.[CHARACTERS_KEY];
+    if (!config?.cards) return;
+    let changed = false;
+    const cards = { ...config.cards }, nextIds = { ...config.nextIds };
+    for (const [owner,items] of Object.entries(cards)) {
+        const first = Number.isSafeInteger(nextIds[owner]) && nextIds[owner] >= 0 ? nextIds[owner] : 0;
+        if (items.some(item => item.cgId === undefined || item.cgId === null || !Array.isArray(item.cgs))) {
+            cards[owner] = validateDirectory(items,first); changed = true;
+        }
+        const next = Math.max(first,...cards[owner].map(item => item.cgId + 1));
+        if (nextIds[owner] !== next) { nextIds[owner] = next; changed = true; }
+    }
+    if (changed) {
+        ctx.extensionSettings[CHARACTERS_KEY] = { ...config,cards,nextIds };
+        ctx.saveSettingsDebounced();
+    }
+}
+const EMPTY_DIRECTORY = [];
+export function directoryOf(ctx) { return ctx.extensionSettings?.[CHARACTERS_KEY]?.cards?.[calendarOwner(ctx)] ?? EMPTY_DIRECTORY; }
+export function characterTag(character, directory = []) {
+    return directory.filter(item => item.name === character.name).length > 1 ? character.cgId + '_' + character.name : character.name;
+}
+export function characterPrompt(item) {
+    const tag = item.tag ?? item.name;
+    return item.content.trim() ? '<' + tag + '>\n' + item.content + '\n</' + tag + '>' : '';
+}
+/** Count the assembled segment using the current host tokenizer, with no extra padding. */
+export async function characterTokenCount(ctx, item) {
+    let text = characterPrompt(item);
+    if (!text) return 0;
+    // renderCharacter deliberately preserves these two standard host macros.
+    text = text.replace(/\{\{(user|char)\}\}/gi,(_,name) => String(name.toLowerCase() === 'user' ? ctx.name1 ?? '' : ctx.name2 ?? ''));
+    const count = typeof ctx.getTokenCountAsync === 'function' ? await ctx.getTokenCountAsync(text,0)
+        : typeof ctx.getTokenCount === 'function' ? await ctx.getTokenCount(text,0) : null;
+    if (!Number.isSafeInteger(count) || count < 0) throw new Error('宿主未能返回有效的 Token 数。');
+    return count;
+}
 export function currentState(ctx, character) {
     return cloneJSON(ctx.chatMetadata?.[CHARACTERS_KEY]?.states?.[character.id] ?? character.baseState);
 }
@@ -163,10 +231,11 @@ export function recentCharacterQuery(chat) {
 export function selectCharacters(ctx, chat = ctx.chat) {
     const query = recentCharacterQuery(chat);
     const normalized = normalizeText(query);
-    const items = directoryOf(ctx).filter(character => character.enabled !== false && character.keywords?.some(keyword =>
-        keyword.trim() && normalized.includes(normalizeText(keyword)))).map(character => renderCharacter(character, currentState(ctx, character)));
+    const directory = directoryOf(ctx);
+    const items = directory.filter(character => character.enabled !== false && character.keywords?.some(keyword =>
+        keyword.trim() && normalized.includes(normalizeText(keyword)))).map(character => ({ ...renderCharacter(character, currentState(ctx, character)),tag:characterTag(character,directory) }));
     return { scope:calendarChat(ctx), query, items,
-        content:items.filter(item => item.content.trim()).map(item => '<' + item.name + '>\n' + item.content + '\n</' + item.name + '>').join('\n\n') };
+        content:items.map(characterPrompt).filter(Boolean).join('\n\n'), cgContent:cgPrompt(items) };
 }
 const collator = new Intl.Collator('zh-Hans-CN-u-co-pinyin', { sensitivity:'base', numeric:true });
 export function sortedCharacters(characters) {
@@ -240,7 +309,7 @@ export function applyStateOperations(characters, states, operations) {
     return { states:result, accepted, ignored };
 }
 export function relationshipsOf(characters, states) {
-    const byName = new Map(characters.map(character => [character.name, character.id]));
+    const byName = new Map(characters.filter(character => characters.filter(item => item.name === character.name).length === 1).map(character => [character.name, character.id]));
     return characters.flatMap(character => (states[character.id]?.relationship ?? []).flatMap(item =>
         Object.entries(item).map(([name, description]) => ({ source:character.id, target:byName.get(name) ?? null, name, description }))));
 }

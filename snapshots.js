@@ -1,6 +1,7 @@
 import { MODULE_KEY, normalizeSettings } from './core.js';
 import { CALENDAR_KEY, calendarOwner, calendarChat, validateCalendar, validateDate, DEFAULT_CALENDAR } from './calendar-core.js';
 import { CHARACTERS_KEY, safeJSON, plainObject, cloneJSON, validateDirectory, validateState } from './characters-core.js';
+import { validateCGFloors } from './character-cg.js';
 import { validateStateAPI } from './character-api.js';
 import { WORLD_KEY, announceWorldChange } from './world-state.js';
 import { downloadMemory } from './host-runtime.js';
@@ -51,7 +52,17 @@ export function validateSnapshot(input) {
     const directory = data.settings[CHARACTERS_KEY];
     if (directory !== null) {
         if (directory.cards !== undefined && !plainObject(directory.cards)) throw new Error('角色目录快照无效。');
-        for (const [key,value] of Object.entries(directory.cards ?? {})) directory.cards[key] = validateDirectory(value);
+        if (directory.defaultStates !== undefined) {
+            if (!plainObject(directory.defaultStates)) throw new Error('默认状态模板无效。');
+            for (const [key,value] of Object.entries(directory.defaultStates)) directory.defaultStates[key] = validateState(value);
+        }
+        if (directory.nextIds !== undefined && (!plainObject(directory.nextIds) || Object.values(directory.nextIds).some(value => !Number.isSafeInteger(value) || value < 0))) throw new Error('角色 ID 计数器无效。');
+        if (directory.cgRenderCount !== undefined) validateCGFloors(directory.cgRenderCount);
+        directory.nextIds = directory.nextIds ?? {};
+        for (const [key,value] of Object.entries(directory.cards ?? {})) {
+            directory.cards[key] = validateDirectory(value,directory.nextIds[key] ?? 0);
+            directory.nextIds[key] = Math.max(directory.nextIds[key] ?? 0,...directory.cards[key].map(item => item.cgId + 1));
+        }
         if (directory.api !== undefined) validateStateAPI(directory.api);
     }
     const date = data.metadata[CALENDAR_KEY];

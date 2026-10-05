@@ -1,10 +1,12 @@
 import { calendarOwner, calendarChat } from './calendar-core.js';
 import { CHARACTERS_KEY, cloneJSON, directoryOf, currentState, validateCharacter, validateDirectory, validateState,
-    sortedCharacters, characterInitial, renderCharacter, stateFields, valueType, relationshipsOf, stateDifference, CONDITION_OPS } from './characters-core.js';
+    sortedCharacters, characterInitial, renderCharacter, stateFields, valueType, relationshipsOf, stateDifference, CONDITION_OPS,
+    ensureCharacterIDs, nextCharacterID, characterTag, characterTokenCount, DEFAULT_CHARACTER_STATE, defaultCharacterState, saveDefaultCharacterState } from './characters-core.js';
 import { DEFAULT_STATE_API, DEFAULT_STATE_PROMPTS, validateStateAPI, requestStateUpdate } from './character-api.js';
 import { CharacterEngine } from './characters-engine.js';
 import { requestModels } from './embeddings.js';
 import { worldEnabled, WORLD_EVENT } from './world-state.js';
+import { cgMacro, validateCGSource, readCGFile, mountCGRenderer, validateCGFloors, DEFAULT_CG_FLOORS } from './character-cg.js';
 
 const el = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
 const id = () => globalThis.crypto?.randomUUID?.() ?? 'c-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
@@ -29,8 +31,12 @@ function avatar(container, character) {
 export function mountCharacters(root, { getContext }) {
     const page = root.querySelector('#wo-characters'), find = name => page.querySelector('#wo-ch-' + name);
     let selected = '', owner = calendarOwner(getContext()), view = 'list', definitionOwner = '', stateScope = '';
+    let defaultsOwner = '';
     let pickerJob = null, testJob = null, pickerTimer, busy = false;
-    let sessionKey = '';
+    let sessionKey = '', previewJob = 0, detailVersion = 0;
+    ensureCharacterIDs(getContext());
+    const cgRenderer = mountCGRenderer({ getContext,getDirectory:directoryOf,enabled:worldEnabled,changeEvent:WORLD_EVENT,
+        getLimit:ctx => ctx.extensionSettings?.[CHARACTERS_KEY]?.cgRenderCount ?? DEFAULT_CG_FLOORS });
     try { sessionKey = sessionStorage.getItem('world_os_characters.apiKey') ?? ''; } catch {}
     const key = config => config.rememberKey ? config.apiKey : sessionKey;
     const config = () => validateStateAPI(getContext().extensionSettings?.[CHARACTERS_KEY]?.api ?? {});
@@ -50,9 +56,10 @@ export function mountCharacters(root, { getContext }) {
     }
     function setView(name) {
         view = name;
+        if (name !== 'detail') previewJob++;
         for (const panel of page.querySelectorAll('[data-ch-view]')) panel.hidden = panel.dataset.chView !== name;
         for (const tab of page.querySelectorAll('[data-ch-tab]')) {
-            if (tab.dataset.chTab === (name === 'detail' ? 'list' : name)) tab.setAttribute('aria-current','page');
+            if (tab.dataset.chTab === (['detail','defaults'].includes(name) ? 'list' : name)) tab.setAttribute('aria-current','page');
             else tab.removeAttribute('aria-current');
         }
         if (name === 'list') renderList();
@@ -64,16 +71,18 @@ export function mountCharacters(root, { getContext }) {
         const list = find('list'); list.replaceChildren();
         const characters = sortedCharacters(directoryOf(getContext()));
         const search = find('search').value.trim().toLocaleLowerCase();
-        const filtered = characters.filter(item => [item.name,...item.keywords].some(text => text.toLocaleLowerCase().includes(search)));
+        const filtered = characters.filter(item => [String(item.cgId),item.name,...item.keywords].some(text => text.toLocaleLowerCase().includes(search)));
         find('count').textContent = characters.length + ' 个角色 · ' + (calendarOwner(getContext()) ? '当前角色卡共享' : '请先打开角色卡');
         find('add').disabled = !calendarOwner(getContext());
+        find('defaults-open').disabled = find('add').disabled;
+        find('cg-floors').value = getContext().extensionSettings?.[CHARACTERS_KEY]?.cgRenderCount ?? DEFAULT_CG_FLOORS;
         let initial = '';
         for (const character of filtered) {
             const letter = characterInitial(character);
             if (letter !== initial) { initial = letter; list.append(el('p','wo-ch-letter',letter)); }
             const row = button('',() => openCharacter(character.id)); row.className = 'wo-ch-contact';
             const picture = el('span','wo-ch-avatar'); avatar(picture,character);
-            const words = el('span','wo-ch-contact-text'); words.append(el('strong','',character.name),el('small','',character.keywords.join(',') || '未设置关键词'));
+            const words = el('span','wo-ch-contact-text'); words.append(el('strong','',character.name),el('small','','ID ' + character.cgId + ' · ' + (character.keywords.join(',') || '未设置关键词')));
             row.append(picture,words,el('span','wo-ch-chevron','›')); list.append(row);
         }
         if (!filtered.length) list.append(el('p','wo-ch-empty',characters.length ? '没有找到匹配的角色。' : '还没有角色。点击“新建角色”，为这个世界添加一位人物。'));
@@ -113,9 +122,49 @@ export function mountCharacters(root, { getContext }) {
         }
         row.append(actions,button('移除此权限配置',() => row.remove())); find('policies').append(row);
     }
+    function addCG(value = { name:'',src:'' }) {
+        const row = el('div','wo-ch-cg-card'); row.dataset.cgRow = '';
+        const picture = el('div','wo-ch-cg-picture'), controls = el('div','wo-ch-cg-controls');
+        const name = field(controls,'CG 名称',value.name); name.dataset.cgName = ''; name.maxLength = 100;
+        const source = field(controls,'图片地址（或从手机上传）',value.src.startsWith('data:') ? '' : value.src);
+        source.dataset.cgSrc = ''; let embedded = value.src.startsWith('data:') ? value.src : '';
+        const sourceValue = () => embedded || source.value.trim();
+        // Keep embedded image data out of the text field so mobile editing stays responsive.
+        Object.defineProperty(row,'cgValue',{ get:() => ({ name:name.value.trim(),src:sourceValue() }) });
+        const file = field(controls,'选择图片'); file.type = 'file'; file.accept = 'image/png,image/jpeg,image/webp,image/gif'; file.dataset.cgFile = '';
+        const macro = el('code','wo-ch-cg-macro');
+        const show = () => {
+            macro.textContent = cgMacro({ cgId:Number(find('id').value) },{ name:name.value.trim() || '图片名' });
+            picture.replaceChildren();
+            if (!sourceValue()) { picture.append(el('i','fa-solid fa-image')); return; }
+            try { validateCGSource(sourceValue()); } catch { picture.append(el('span','','图片地址无效')); return; }
+            const img = el('img'); img.src = sourceValue(); img.alt = name.value || 'CG 预览'; img.loading = 'lazy'; img.referrerPolicy = 'no-referrer';
+            img.addEventListener('error',() => picture.replaceChildren(el('span','','图片加载失败')),{once:true}); picture.append(img);
+        };
+        name.addEventListener('input',() => { macro.textContent = cgMacro({ cgId:Number(find('id').value) },{ name:name.value.trim() || '图片名' }); });
+        source.addEventListener('input',() => { embedded = ''; source.placeholder = 'https://…'; });
+        source.addEventListener('change',show);
+        file.addEventListener('change',() => void action(async () => {
+            const selectedFile = file.files[0], version = detailVersion, capturedOwner = definitionOwner;
+            if (!selectedFile) return;
+            const src = await readCGFile(selectedFile);
+            if (!row.isConnected || version !== detailVersion || capturedOwner !== calendarOwner(getContext())) throw new DOMException('角色已变化','AbortError');
+            embedded = src; source.value = ''; source.placeholder = '已上传本地图片';
+            if (!name.value.trim()) name.value = selectedFile.name.replace(/\.[^.]+$/,'');
+            show(); say('CG 图片已载入，保存角色设定后生效。');
+        }));
+        if (embedded) source.placeholder = '已上传本地图片';
+        const actions = el('div','fm-actions');
+        actions.append(button('复制图片宏',() => void action(async () => {
+            const text = macro.textContent;
+            if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
+            say('图片宏：' + text);
+        })),button('移除 CG',() => row.remove()));
+        controls.append(macro,actions); row.append(picture,controls); find('cgs').append(row); show();
+    }
     function readDefinition() {
         const existing = directoryOf(getContext()).find(item => item.id === selected);
-        const result = { id:selected || id(),name:find('name').value,sortName:find('sort').value,enabled:find('enabled').checked,
+        const result = { id:selected || id(),cgId:Number(find('id').value),cgs:[...find('cgs').children].map(row => row.cgValue),name:find('name').value,sortName:find('sort').value,enabled:find('enabled').checked,
             avatar:find('avatar').value,keywords:find('keywords').value,description:find('description').value,
             baseState:parseJSON(find('base-state').value,'基础状态'), policies:[...find('policies').children].map(row => ({
                 path:row.querySelector('[data-policy-path]').value, type:row.querySelector('[data-policy-type]').value,
@@ -132,12 +181,15 @@ export function mountCharacters(root, { getContext }) {
     }
     function openCharacter(characterId = '') {
         if (!calendarOwner(getContext())) { say('请先打开角色卡。','warning'); return; }
-        selected = characterId;
+        selected = characterId; detailVersion++; previewJob++;
+        ensureCharacterIDs(getContext());
         const character = directoryOf(getContext()).find(item => item.id === selected) ?? {
             name:'',sortName:'',avatar:'',keywords:[],enabled:true,description:'',
-            baseState:{ age:20,heigh:'165cm',affection:0,relationship:[] },stages:[],policies:[],
+            baseState:defaultCharacterState(getContext()),stages:[],policies:[],
         };
         definitionOwner = calendarOwner(getContext());
+        find('id').value = character.cgId ?? nextCharacterID(getContext());
+        find('cgs').replaceChildren(); (character.cgs ?? []).forEach(addCG);
         find('name').value = character.name; find('sort').value = character.sortName ?? '';
         find('avatar').value = character.avatar; find('avatar-file').value = '';
         find('enabled').checked = character.enabled !== false; find('keywords').value = character.keywords.join(',');
@@ -155,7 +207,7 @@ export function mountCharacters(root, { getContext }) {
         stateScope = calendarChat(getContext());
         const controls = [...find('state-form').querySelectorAll('input,textarea,button'),find('manual-update')];
         controls.forEach(control => { control.disabled = !character || !stateScope || Boolean(engine.job); });
-        if (!character) { find('current-state').value = ''; find('stage-current').textContent = '先保存角色，再编辑聊天状态。'; find('preview').textContent = ''; return; }
+        if (!character) { previewJob++; find('current-state').value = ''; find('stage-current').textContent = '先保存角色，再编辑聊天状态。'; find('preview').textContent = ''; find('tokens').textContent = '保存角色后统计 Token'; return; }
         const state = currentState(getContext(),character);
         if (force || find('current-state').dataset.persisted === find('current-state').value || !find('current-state').dataset.persisted) {
             find('current-state').value = jsonText(state); find('current-state').dataset.persisted = find('current-state').value;
@@ -163,14 +215,27 @@ export function mountCharacters(root, { getContext }) {
         const preview = renderCharacter(character,state);
         find('stage-current').textContent = '当前阶段：' + preview.stage;
         find('preview').textContent = preview.content || '还没有角色设定。';
+        void updateTokens(character,preview);
+    }
+    async function updateTokens(character, preview) {
+        const ticket = ++previewJob, capturedScope = calendarChat(getContext()), capturedOwner = calendarOwner(getContext());
+        find('tokens').textContent = '上下文 Token：统计中…';
+        try {
+            const count = await characterTokenCount(getContext(),{ ...preview,tag:characterTag(character,directoryOf(getContext())) });
+            if (ticket !== previewJob || selected !== character.id || capturedScope !== calendarChat(getContext()) || capturedOwner !== calendarOwner(getContext())) return;
+            find('tokens').textContent = '上下文 Token：' + count.toLocaleString();
+        } catch {
+            if (ticket === previewJob) find('tokens').textContent = '上下文 Token：暂不可用（请检查宿主分词器）';
+        }
     }
     function saveDirectory(characters) {
         const ctx = getContext(), currentOwner = calendarOwner(ctx);
         if (!currentOwner || currentOwner !== definitionOwner) throw new Error('角色卡已切换，请重新打开详情。');
-        const next = validateDirectory(characters), previous = ctx.extensionSettings[CHARACTERS_KEY] ?? {};
+        const next = validateDirectory(characters,nextCharacterID(ctx)), previous = ctx.extensionSettings[CHARACTERS_KEY] ?? {};
         engine.changed();
-        ctx.extensionSettings[CHARACTERS_KEY] = { ...previous, schema:1,cards:{ ...previous.cards,[currentOwner]:next } };
-        ctx.saveSettingsDebounced(); renderList();
+        ctx.extensionSettings[CHARACTERS_KEY] = { ...previous, schema:1,cards:{ ...previous.cards,[currentOwner]:next },
+            nextIds:{ ...previous.nextIds,[currentOwner]:Math.max(nextCharacterID(ctx),...next.map(item => item.cgId + 1)) } };
+        ctx.saveSettingsDebounced(); renderList(); cgRenderer.refresh();
     }
     async function saveCurrentState(value) {
         const ctx = getContext();
@@ -310,6 +375,37 @@ export function mountCharacters(root, { getContext }) {
             say('图片已载入，保存角色后生效。');
         } finally { URL.revokeObjectURL(url); }
     }));
+    find('defaults-open').addEventListener('click',() => void action(() => {
+        defaultsOwner = calendarOwner(getContext());
+        if (!defaultsOwner) throw new Error('请先打开角色卡。');
+        find('default-state').value = jsonText(defaultCharacterState(getContext()));
+        say(''); setView('defaults');
+    }));
+    find('defaults-back').addEventListener('click',() => setView('list'));
+    find('default-reset').addEventListener('click',() => {
+        find('default-state').value = jsonText(DEFAULT_CHARACTER_STATE); say('已填入内置模板，点击“保存默认状态”后生效。');
+    });
+    find('default-form').addEventListener('submit',event => { event.preventDefault(); void action(() => {
+        if (!defaultsOwner || defaultsOwner !== calendarOwner(getContext())) throw new Error('角色卡已切换，请重新打开默认状态设置。');
+        const state = parseJSON(find('default-state').value,'默认状态');
+        saveDefaultCharacterState(getContext(),state);
+        find('default-state').value = jsonText(state);
+        say('默认状态已保存。此角色卡中新建的角色将使用该模板，已有角色和聊天状态保持原样。');
+    }); });
+    find('cg-add').addEventListener('click',() => addCG());
+    find('cg-floors').addEventListener('change',() => void action(() => {
+        const input = find('cg-floors');
+        if (!input.value.trim()) throw new Error('请填写 CG 显示楼数。');
+        const count = validateCGFloors(Number(input.value)), ctx = getContext();
+        ctx.extensionSettings[CHARACTERS_KEY] = { ...ctx.extensionSettings[CHARACTERS_KEY],cgRenderCount:count };
+        ctx.saveSettingsDebounced(); cgRenderer.refresh(); say(count ? '只显示最近 ' + count + ' 楼的 CG 图片。' : '已关闭聊天 CG 图片显示，保留宏文本。');
+    }));
+    find('copy-cg').addEventListener('click',() => void action(async () => {
+        if (navigator.clipboard?.writeText) await navigator.clipboard.writeText('{{CG}}');
+        say('预设宏：{{CG}}');
+    }));
+    find('tokens-refresh').addEventListener('click',() => refreshState(false));
+    find('preview-section').addEventListener('toggle',() => { if (find('preview-section').open && view === 'detail') refreshState(false); });
     find('add').addEventListener('click',() => openCharacter());
     find('list-back').addEventListener('click',() => setView('list'));
     find('search').addEventListener('input',renderList);
@@ -353,6 +449,7 @@ export function mountCharacters(root, { getContext }) {
     }));
     find('cancel').addEventListener('click',() => { pickerJob?.abort(); testJob?.abort(); engine.cancel(); say('已取消请求。'); });
     function refresh() {
+        ensureCharacterIDs(getContext()); cgRenderer.refresh();
         const currentOwner = calendarOwner(getContext());
         if (owner !== currentOwner) { owner = currentOwner; selected = ''; setView('list'); }
         renderList(); if (view === 'detail') refreshState(true);
@@ -362,6 +459,7 @@ export function mountCharacters(root, { getContext }) {
     const ctx = getContext();
     for (const name of ['CHAT_CHANGED','CHAT_LOADED','CHARACTER_SELECTED']) if (ctx.eventTypes[name]) ctx.eventSource.on(ctx.eventTypes[name],refresh);
     document.addEventListener(WORLD_EVENT,event => { refresh(); if (event.detail?.kind === 'restore') { selected = ''; setView('list'); fillAPI(); } });
+    for (const name of ['ONLINE_STATUS_CHANGED','CHATCOMPLETION_MODEL_CHANGED','PRESET_CHANGED']) if (ctx.eventTypes[name]) ctx.eventSource.on(ctx.eventTypes[name],() => { if (view === 'detail') refreshState(false); });
     fillAPI(); renderList(); engine.mount();
     return { engine,refresh };
 }

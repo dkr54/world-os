@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CHARACTERS_KEY, validateCharacter, validateDirectory, validateState, currentState, selectCharacters, recentCharacterQuery,
-    renderCharacter, applyStateOperations, stateDifference, relationshipsOf, sortedCharacters, safeJSON, getStateValue } from '../characters-core.js';
+    defaultCharacterState, saveDefaultCharacterState, DEFAULT_CHARACTER_STATE, renderCharacter, applyStateOperations, stateDifference, relationshipsOf, sortedCharacters, safeJSON, getStateValue } from '../characters-core.js';
 import { validateStateAPI, stateMessages, parseStateResponse, requestStateUpdate } from '../character-api.js';
 import { CharacterEngine } from '../characters-engine.js';
 import { createSnapshot, restoreSnapshot, validateSnapshot } from '../snapshots.js';
@@ -106,8 +106,9 @@ test('关系图保留方向、完整描述和未建档关系对象；差异包�
     const diff=stateDifference({age:20,relationship:[{苏岚:'初识'}]},{affection:1,relationship:[{苏岚:'朋友'}]});
     assert(diff.some(item=>item.path==='age' && item.after===undefined));assert(diff.some(item=>item.path==='relationship.苏岚'));
 });
-test('重复角色名、危险头像和非法条件不可保存',() => {
-    assert.throws(()=>validateDirectory([person(),person({id:'b'})]));
+test('重复内部标识、危险头像和非法条件不可保存；同名角色以数字 ID 区分',() => {
+    assert.throws(()=>validateDirectory([person(),person()]));
+    assert.deepEqual(validateDirectory([person(),person({id:'b'})]).map(item=>item.cgId),[0,1]);
     assert.throws(()=>person({avatar:'javascript:alert(1)'}));
     assert.throws(()=>person({stages:[{id:'bad',name:'x',content:'x',conditions:[{path:'age',op:'eval',value:1}]}]}));
 });
@@ -262,4 +263,34 @@ test('恢复未配置某功能的快照时，未导出的本机接口密钥仍�
     const ctx=context();delete ctx.extensionSettings[CHARACTERS_KEY];const snapshot=createSnapshot(ctx);
     ctx.extensionSettings[CHARACTERS_KEY]={api:validateStateAPI({apiKey:'retain-this',rememberKey:true})};
     await restoreSnapshot(snapshot,ctx);assert.equal(ctx.extensionSettings[CHARACTERS_KEY].api.apiKey,'retain-this');
+});
+
+
+test('默认状态模板按角色卡共享，空对象有效，每次新建使用独立副本',()=>{
+    const ctx=context(), existing=JSON.stringify(ctx.extensionSettings[CHARACTERS_KEY].cards);
+    assert.deepEqual(defaultCharacterState(ctx),{age:20,heigh:'165cm',affection:0,relationship:[]});
+    saveDefaultCharacterState(ctx,{age:18,profile:{identity:'学生'},relationship:[{苏岚:'朋友'}]});
+    const next=defaultCharacterState({...ctx,chatId:'different',chatMetadata:{}});
+    next.profile.identity='已改变';next.relationship[0].苏岚='陌生人';
+    assert.equal(defaultCharacterState(ctx).profile.identity,'学生');assert.equal(defaultCharacterState(ctx).relationship[0].苏岚,'朋友');
+    assert.equal(JSON.stringify(ctx.extensionSettings[CHARACTERS_KEY].cards),existing);
+    assert.deepEqual(defaultCharacterState({...ctx,characters:[{avatar:'other-card.png'}]}),DEFAULT_CHARACTER_STATE);
+    saveDefaultCharacterState(ctx,{});assert.deepEqual(defaultCharacterState(ctx),{});
+});
+test('坏默认 JSON 不覆盖已保存模板或当前角色状态，未打开角色卡时不保存',()=>{
+    const ctx=context();ctx.chatMetadata[CHARACTERS_KEY]={states:{a:{age:99}}};
+    saveDefaultCharacterState(ctx,{mood:'平静'});
+    const before=JSON.stringify(ctx.extensionSettings[CHARACTERS_KEY]);
+    for(const state of [[],null,'x',{relationship:'朋友'}])assert.throws(()=>saveDefaultCharacterState(ctx,state));
+    assert.equal(JSON.stringify(ctx.extensionSettings[CHARACTERS_KEY]),before);assert.equal(ctx.chatMetadata[CHARACTERS_KEY].states.a.age,99);
+    assert.throws(()=>saveDefaultCharacterState({...ctx,characterId:undefined,characters:[]},{}),/角色卡/);
+});
+test('状态快照保存恢复默认模板，兼容旧快照并拒绝非法模板',async()=>{
+    const ctx=context();saveDefaultCharacterState(ctx,{mood:'平静',inventory:[]});
+    const snapshot=createSnapshot(ctx);saveDefaultCharacterState(ctx,{mood:'紧张'});
+    await restoreSnapshot(snapshot,ctx);assert.equal(defaultCharacterState(ctx).mood,'平静');
+    const legacy=structuredClone(snapshot);delete legacy.settings[CHARACTERS_KEY].defaultStates;
+    await restoreSnapshot(legacy,ctx);assert.deepEqual(defaultCharacterState(ctx),DEFAULT_CHARACTER_STATE);
+    const bad=structuredClone(snapshot);bad.settings[CHARACTERS_KEY].defaultStates['character:card.png']={relationship:123};
+    assert.throws(()=>validateSnapshot(bad),/relationship/);
 });

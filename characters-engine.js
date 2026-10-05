@@ -1,8 +1,11 @@
 import { calendarChat } from './calendar-core.js';
 import { CHARACTERS_KEY, cloneJSON, directoryOf, currentState, selectCharacters, applyStateOperations } from './characters-core.js';
 import { DEFAULT_STATE_API, validateStateAPI, requestStateUpdate } from './character-api.js';
+import { cgCharacterPrompt } from './character-cg.js';
 import { worldEnabled, WORLD_EVENT } from './world-state.js';
 
+// Image bytes do not affect state permissions. Avoid repeatedly serializing the CG gallery during updates.
+const definitionSignature = items => JSON.stringify(items.map(({ avatar,cgs,...item }) => ({ ...item,cgNames:(cgs ?? []).map(cg => cg.name) })));
 const replySignature = message => JSON.stringify([message?.mes, message?.swipe_id, message?.send_date, message?.gen_started, message?.gen_finished]);
 const realReply = message => message && !message.is_user && !message.is_system && message.role !== 'tool'
     && !message.extra?.tool_invocations?.length && !message.tool_calls?.length && typeof message.mes === 'string' && message.mes.trim();
@@ -20,7 +23,7 @@ export class CharacterEngine {
         const ctx = this.getContext();
         this.run = { type, scope:calendarChat(ctx), metadata:ctx.chatMetadata,
             before:new Map(ctx.chat.map(message => [message,replySignature(message)])), prepared:false,
-            selection:null, expanded:false, confirmed:false, called:[], received:null, ended:false, done:false };
+            selection:null, expanded:false, cgExpanded:false, confirmed:false, called:[], received:null, ended:false, done:false };
     }
     prepare(type = 'normal') {
         const run = this.run, ctx = this.getContext();
@@ -28,22 +31,24 @@ export class CharacterEngine {
         // The host's real chat still has its raw messages here; floor-memory projection has not run yet.
         const chat = type === 'swipe' ? ctx.chat.slice(0,-1) : ctx.chat;
         run.selection = selectCharacters(ctx,chat);
-        run.prepared = true; run.expanded = false; run.confirmed = false; run.called = [];
+        run.prepared = true; run.expanded = false; run.cgExpanded = false; run.confirmed = false; run.called = [];
     }
     validRun(run) {
         const ctx = this.getContext();
         return this.run === run && worldEnabled(ctx) && calendarChat(ctx) === run.scope && ctx.chatMetadata === run.metadata;
     }
-    macro() {
+    macro(kind = 'character') {
         const ctx = this.getContext();
         if (!worldEnabled(ctx) || !calendarChat(ctx)) return '';
         const run = this.run;
         if (run && !run.ended && !run.done && this.validRun(run)) {
             if (!run.prepared) this.prepare(run.type);
+            if (kind === 'CG') { run.cgExpanded = true; return run.selection.cgContent; }
             run.expanded = true; return run.selection.content;
         }
         // Host previews may expand macros outside a real generation. They never arm auto updates.
-        return selectCharacters(ctx).content;
+        const selection = selectCharacters(ctx);
+        return kind === 'CG' ? selection.cgContent : selection.content;
     }
     confirmPrompt(data, dryRun = false) {
         const run = this.run;
@@ -52,7 +57,13 @@ export class CharacterEngine {
         if (prompt === undefined) return;
         if (!run.prepared) this.prepare(run.type);
         const text = typeof prompt === 'string' ? prompt : JSON.stringify(prompt);
-        run.called = run.selection.items.filter(item => run.expanded && item.content.trim() && text.includes('<' + item.name + '>') && text.includes('</' + item.name + '>')).map(item => item.id);
+        run.called = run.selection.items.filter(item => {
+            const tag = item.tag ?? item.name;
+            const description = run.expanded && item.content.trim() && text.includes('<' + tag + '>') && text.includes('</' + tag + '>');
+            const cg = cgCharacterPrompt(item);
+            // A CG-only preset can also call a character. Final request confirmation remains mandatory.
+            return description || (run.cgExpanded && cg && text.includes('<' + item.cgId + '_' + item.name + '>') && text.includes('</' + item.cgId + '_' + item.name + '>'));
+        }).map(item => item.id);
         run.confirmed = true;
         this.onChange();
     }
@@ -111,10 +122,10 @@ export class CharacterEngine {
         const ctx = this.getContext(), scope = calendarChat(ctx);
         if (!scope || !worldEnabled(ctx)) throw new Error('请先打开聊天并启用 world os。');
         const config = this.api(), controller = new AbortController(); this.job = controller;
-        const definitionVersion = JSON.stringify(directoryOf(ctx)), settingsVersion = JSON.stringify(config);
+        const definitionVersion = definitionSignature(directoryOf(ctx)), settingsVersion = JSON.stringify(config);
         const before = Object.fromEntries(definitions.map(item => [item.id,currentState(ctx,item)]));
         const guard = () => !controller.signal.aborted && worldEnabled(this.getContext()) && calendarChat(this.getContext()) === scope
-            && this.getContext().chatMetadata === ctx.chatMetadata && JSON.stringify(directoryOf(this.getContext())) === definitionVersion
+            && this.getContext().chatMetadata === ctx.chatMetadata && definitionSignature(directoryOf(this.getContext())) === definitionVersion
             && JSON.stringify(this.api()) === settingsVersion
             && definitions.every(item => JSON.stringify(currentState(this.getContext(),item)) === JSON.stringify(before[item.id]))
             && (!run || (this.validRun(run) && ctx.chat.includes(run.received) && run.received.mes === report.reply));
@@ -154,10 +165,12 @@ export class CharacterEngine {
     mount() {
         const ctx = this.getContext(), { eventSource,eventTypes } = ctx;
         const listen = (name, callback) => { if (eventTypes[name]) eventSource.on(eventTypes[name],callback); };
-        const handler = () => this.macro();
-        if (typeof ctx.registerMacro === 'function') ctx.registerMacro('character',handler,'world os 当前命中角色的阶段设定');
-        else if (ctx.macros?.register) ctx.macros.register('character',{ handler,description:'world os 当前命中角色的阶段设定' });
-        else this.onChange('宿主缺少宏注册接口，请更新后使用 {{character}}。');
+        for (const [name,description] of [['character','world os 当前命中角色的阶段设定'],['CG','world os 当前命中角色的 CG 宏列表']]) {
+            const handler = () => this.macro(name);
+            if (typeof ctx.registerMacro === 'function') ctx.registerMacro(name,handler,description);
+            else if (ctx.macros?.register) ctx.macros.register(name,{ handler,description });
+            else this.onChange('宿主缺少宏注册接口，请更新后使用 {{' + name + '}}。');
+        }
         listen('GENERATION_STARTED',(...args) => this.start(...args));
         listen('CHAT_COMPLETION_PROMPT_READY',data => this.confirmPrompt(data));
         listen('GENERATE_AFTER_COMBINE_PROMPTS',data => { if (this.getContext().mainApi !== 'openai') this.confirmPrompt(data); });

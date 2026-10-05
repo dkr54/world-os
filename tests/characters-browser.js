@@ -145,6 +145,52 @@ export async function runCharacterChecks({ check, assert, waitFor, delay, emit, 
         const body=q('world-os').querySelector('.wo-window-body');assert(body.scrollWidth<=body.clientWidth+1,'directory horizontal overflow');
         const nav=q('wo-characters').querySelector('.wo-ch-nav');assert(nav.querySelectorAll('button').length===4,'bottom navigation incomplete');
     });
+    const { runCGChecks } = await import('./character-cg-browser.js');
+    await runCGChecks({check,assert,waitFor,delay,emit,getContext,setContext,macros,mainId});
+    await check('默认状态按钮紧邻新建角色，JSON 保存只影响后续新建，空模板与快照可用',async()=>{
+        tab('list');
+        assert(q('wo-ch-add').parentElement===q('wo-ch-defaults-open').parentElement,'default button is not beside new character');
+        const oldCharacters=JSON.stringify(characters()),oldStates=JSON.stringify(ctx.chatMetadata[CHARACTERS_KEY]);
+        q('wo-ch-defaults-open').click();await delay(40);
+        assert(!document.querySelector('[data-ch-view="defaults"]').hidden,'default settings view did not open');
+        q('wo-ch-default-state').value='{"broken":}';await submit('wo-ch-default-form');
+        assert(status().includes('不是合法 JSON'),'invalid JSON not reported');
+        assert(!ctx.extensionSettings[CHARACTERS_KEY].defaultStates,'invalid template was stored');
+        const template={mood:'平静',rank:0,profile:{guild:'守望者'},relationship:[]};
+        q('wo-ch-default-state').value=JSON.stringify(template);await submit('wo-ch-default-form');
+        assert(JSON.stringify(characters())===oldCharacters,'template changed existing characters');
+        assert(JSON.stringify(ctx.chatMetadata[CHARACTERS_KEY])===oldStates,'template changed running states');
+        q('wo-ch-defaults-back').click();q('wo-ch-add').click();
+        assert(JSON.stringify(JSON.parse(q('wo-ch-base-state').value))===JSON.stringify(template),'new character did not use template');
+        q('wo-ch-base-state').value='{"mood":"草稿"}';q('wo-ch-list-back').click();q('wo-ch-defaults-open').click();await delay(40);
+        assert(JSON.parse(q('wo-ch-default-state').value).mood==='平静','new-character draft mutated template');
+        q('wo-ch-default-state').value='{}';await submit('wo-ch-default-form');
+        q('wo-ch-defaults-back').click();q('wo-ch-add').click();
+        assert(q('wo-ch-base-state').value==='{}','empty default was replaced with built-in values');
+        q('wo-ch-list-back').click();q('wo-ch-defaults-open').click();await delay(40);
+        q('wo-ch-default-state').value=JSON.stringify(template);await submit('wo-ch-default-form');
+        const snapshot=validateSnapshot(createSnapshot(ctx));
+        assert(snapshot.settings[CHARACTERS_KEY].defaultStates['character:directory-guide.png'].mood==='平静','snapshot missing template');
+        q('wo-ch-defaults-back').click();
+    });
+    await check('默认状态跨聊天共享，切换角色卡保护旧草稿，内置模板需保存才覆盖',async()=>{
+        const template=JSON.stringify(ctx.extensionSettings[CHARACTERS_KEY].defaultStates);
+        setContext({...ctx,chatId:'template-other-chat',chatMetadata:{}});emit('CHAT_CHANGED');
+        q('wo-ch-defaults-open').click();await delay(40);
+        assert(JSON.parse(q('wo-ch-default-state').value).mood==='平静','same-card chat lost template');
+        q('wo-ch-default-reset').click();
+        assert(JSON.parse(q('wo-ch-default-state').value).age===20,'built-in template not filled');
+        assert(JSON.stringify(ctx.extensionSettings[CHARACTERS_KEY].defaultStates)===template,'reset draft persisted without save');
+        setContext({...ctx,characterId:0,characters:[{avatar:'template-other-card.png'}],chatId:'other-card',chatMetadata:{}});emit('CHAT_CHANGED');
+        await submit('wo-ch-default-form');assert(status().includes('角色卡已切换'),'late save did not enforce owner');
+        q('wo-ch-defaults-open').click();await delay(40);
+        assert(JSON.parse(q('wo-ch-default-state').value).age===20,'template leaked into different card');
+        const body=q('world-os').querySelector('.wo-window-body');assert(body.scrollWidth<=body.clientWidth+1,'default JSON editor overflow');
+        setContext(ctx);emit('CHAT_CHANGED');tab('list');
+    });
+    globalThis.__showDefaultStateFixture=()=>{
+        setContext(ctx);emit('CHAT_CHANGED');if(!q('world-os').open)q('wo-launcher').click();q('wo-open-characters').click();tab('list');q('wo-ch-defaults-open').click();
+    };
     globalThis.__showCharacterFixture=()=>{
         setContext(ctx);emit('CHAT_CHANGED');if(!q('world-os').open)q('wo-launcher').click();q('wo-open-characters').click();tab('list');
     };

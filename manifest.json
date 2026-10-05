@@ -6,7 +6,7 @@
   "js": "index.js",
   "css": "style.css",
   "author": "dkr54",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "minimum_client_version": "1.13.0",
   "generate_interceptor": "floorMemoryInterceptor",
   "homePage": "https://github.com/dkr54/world-os"

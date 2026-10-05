@@ -266,20 +266,42 @@
     <section id="wo-characters" class="wo-characters floor-memory" data-wo-page="characters" data-wo-title="角色目录" hidden>
       <p id="wo-ch-status" class="fm-status" role="status" aria-live="polite"></p>
       <div class="wo-ch-view" data-ch-view="list">
-        <div class="wo-ch-heading"><div><h3>角色</h3><p id="wo-ch-count" class="fm-hint"></p></div><button type="button" id="wo-ch-add" class="menu_button"><i class="fa-solid fa-user-plus" aria-hidden="true"></i> 新建角色</button></div>
+        <div class="wo-ch-heading"><div><h3>角色</h3><p id="wo-ch-count" class="fm-hint"></p></div><div class="wo-ch-create-actions"><button type="button" id="wo-ch-add" class="menu_button"><i class="fa-solid fa-user-plus" aria-hidden="true"></i> 新建角色</button><button type="button" id="wo-ch-defaults-open" class="menu_button"><i class="fa-solid fa-sliders" aria-hidden="true"></i> 默认状态</button></div></div>
         <label class="wo-ch-search"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input id="wo-ch-search" class="text_pole" placeholder="搜索角色姓名或关键词" aria-label="搜索角色"></label>
+        <details class="wo-ch-display-options"><summary>聊天 CG 显示范围</summary>
+          <label>只显示最近 N 楼的 CG<input id="wo-ch-cg-floors" class="text_pole" type="number" min="0" max="1000" step="1" value="10" inputmode="numeric"></label>
+          <p class="fm-hint">全局设置，修改即保存。用户消息和 AI 回复各算一楼，默认 10；0 为不显示。更早的楼层恢复显示图片宏，不改动原始消息。</p>
+        </details>
         <div id="wo-ch-list" class="wo-ch-list"></div>
         <p class="fm-hint">目录跟随当前角色卡。中文按拼音顺序排列，可在详情中填写排序名来调整多音字。聊天状态独立保存。</p>
+      </div>
+      <div class="wo-ch-view" data-ch-view="defaults" hidden>
+        <button type="button" id="wo-ch-defaults-back" class="menu_button"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i> 角色列表</button>
+        <h3>新角色的默认状态</h3>
+        <p class="fm-hint">此模板由当前角色卡的所有聊天共享。点击“新建角色”时自动填入，可在角色详情中继续修改。保存模板只影响之后新建的角色。</p>
+        <form id="wo-ch-default-form">
+          <label>默认状态 JSON<textarea id="wo-ch-default-state" class="text_pole fm-code" rows="12" spellcheck="false" aria-describedby="wo-ch-default-hint"></textarea></label>
+          <p id="wo-ch-default-hint" class="fm-hint">可自由添加、修改或删除字段，也可以保存空对象 {}。如使用 relationship，它需要是对象数组，例如 [{"苏岚":"初识"}]。新角色会获得独立副本。</p>
+          <div class="fm-actions"><button type="submit" id="wo-ch-default-save" class="menu_button">保存默认状态</button><button type="button" id="wo-ch-default-reset" class="menu_button">填入内置模板</button></div>
+        </form>
       </div>
       <div class="wo-ch-view" data-ch-view="detail" hidden>
         <button type="button" id="wo-ch-list-back" class="menu_button"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i> 角色列表</button>
         <div class="wo-ch-profile"><div id="wo-ch-avatar-preview" class="wo-ch-avatar wo-ch-avatar-large"></div><div><h3 id="wo-ch-detail-name">新角色</h3><p id="wo-ch-stage-current" class="fm-hint"></p></div></div>
         <form id="wo-ch-definition-form">
+          <label>角色 ID<input id="wo-ch-id" class="text_pole" type="number" min="0" readonly aria-describedby="wo-ch-id-hint"></label>
+          <p id="wo-ch-id-hint" class="fm-hint">在当前角色卡下从 0 自动递增，保存后固定。支持同名角色；删掉的编号不再自动分配，避免历史 CG 指向其他角色。</p>
           <div class="fm-grid fm-grid-two"><label>角色名<input id="wo-ch-name" class="text_pole" maxlength="100" required></label><label>排序名（可选，拼音或英文）<input id="wo-ch-sort" class="text_pole" placeholder="例如 shilijiaosejia"></label></div>
           <label class="checkbox_label"><input id="wo-ch-enabled" type="checkbox" checked>参与关键词匹配</label>
           <label>触发关键词<input id="wo-ch-keywords" class="text_pole" placeholder="示例角色甲,角色甲"></label>
           <p class="fm-hint">英文逗号分隔；中文逗号视为关键词的一部分。留空不匹配。查询直接使用最新两条用户或 AI 消息。</p>
           <details><summary>角色图片</summary><label>图片网址<input id="wo-ch-avatar" class="text_pole" placeholder="https://…"></label><label>或从手机选择图片<input id="wo-ch-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label><p class="fm-hint">上传图片会缩小后保存，快照也会包含上传头像。</p><button id="wo-ch-avatar-clear" type="button" class="menu_button">移除图片</button></details>
+          <details id="wo-ch-cg-section"><summary>角色 CG</summary>
+            <p class="fm-hint">每张 CG 设置一个名称，并上传图片或填写 HTTP(S) 图片地址。CG 与角色设定一起保存；可在回复中使用下方图片宏。原始聊天与编辑内容始终保留宏文本。</p>
+            <div id="wo-ch-cgs" class="wo-ch-cgs"></div>
+            <div class="fm-actions"><button id="wo-ch-cg-add" type="button" class="menu_button"><i class="fa-solid fa-image" aria-hidden="true"></i> 添加 CG</button><button id="wo-ch-copy-cg" type="button" class="menu_button">复制预设宏 {{CG}}</button></div>
+            <p class="fm-hint">在聊天预设中加入 {{CG}}，列出本轮命中角色的所有 CG 宏。小图片保留原文件；大图片会缩小保存，大 GIF 请使用图片地址。上传图片会随状态快照保存。</p>
+          </details>
           <label>基础设定<textarea id="wo-ch-description" class="text_pole" rows="5" placeholder="年龄：{{age}}；身高：{{heigh}}；与苏岚的关系：{{relationship.苏岚}}"></textarea></label>
           <details><summary>分阶段设定</summary>
             <p class="fm-hint">基础设定始终保留。每阶段的所有条件都满足才可选；多个阶段满足时，采用列表中最靠后的一个。空条件可作为默认阶段。这里只把选中阶段发送给模型，所有阶段都可在此编辑。</p>
@@ -300,7 +322,11 @@
           <label>给状态模型的更新要求<textarea id="wo-ch-manual-requirements" class="text_pole" rows="3" placeholder="例如：根据刚才的事件，记录她对苏岚的态度变化。"></textarea></label>
           <button type="button" id="wo-ch-manual-update" class="menu_button">AI 更新此角色状态</button>
         </details>
-        <details><summary>当前阶段与宏替换预览</summary><pre id="wo-ch-preview" class="fm-output"></pre></details>
+        <details id="wo-ch-preview-section"><summary>当前阶段与宏替换预览</summary>
+          <div class="wo-ch-token-line"><strong id="wo-ch-tokens" role="status" aria-live="polite">保存角色后统计 Token</strong><button id="wo-ch-tokens-refresh" type="button" class="menu_button">重新统计</button></div>
+          <p class="fm-hint">统计已保存设定、当前匹配阶段与状态宏替换后的文本，包含角色标签，使用宿主当前分词器。该角色命中时占用这部分上下文；不包含独立的 CG 列表和其他提示词。</p>
+          <pre id="wo-ch-preview" class="fm-output"></pre>
+        </details>
       </div>
       <div class="wo-ch-view" data-ch-view="relations" hidden>
         <h3>角色关系</h3><p class="fm-hint">箭头从当前角色指向关系对象。点选角色后可查看详情；下方列出完整描述。</p>

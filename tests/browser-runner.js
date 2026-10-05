@@ -281,17 +281,25 @@ try {
         });
         if (tauri) await uiCheck('Android 触摸角色、关系、接口、调试与快照入口，底部菜单保持可达', async () => {
             const tap = async selector => {
-                const point = await evaluate("(() => { const node=document.querySelector(" + JSON.stringify(selector) + "); node.scrollIntoView({block:'nearest'}); const r=node.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()");
+                const point = await evaluate("(() => { const node=document.querySelector(" + JSON.stringify(selector) + "); node.scrollIntoView({block:'center'}); const r=node.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()");
                 await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...point,id:1,radiusX:1,radiusY:1,force:1}]});
                 await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]}); await sleep(70);
             };
             await evaluate("globalThis.__showCharacterFixture()");
             await tap('#wo-ch-list .wo-ch-contact');
             if (!await evaluate("!document.querySelector('[data-ch-view=\"detail\"]').hidden")) throw new Error('contact touch did not open details');
+            await tap('#wo-ch-cg-section > summary');
+            if (!await evaluate("document.querySelector('#wo-ch-cg-section').open && document.querySelectorAll('#wo-ch-cgs img').length === 2")) throw new Error('CG touch did not open saved gallery: '+JSON.stringify(await evaluate("({open:document.querySelector('#wo-ch-cg-section').open,images:document.querySelectorAll('#wo-ch-cgs img').length,id:document.querySelector('#wo-ch-id').value})")));
             for (const name of ['relations','api','debug','list']) {
                 await tap('[data-ch-tab="' + name + '"]');
                 if (!await evaluate("!document.querySelector('[data-ch-view=\"" + name + "\"]').hidden")) throw new Error('tab touch did not switch to '+name);
             }
+            if (!await evaluate("document.querySelector('.wo-ch-display-options').open")) await tap('.wo-ch-display-options > summary');
+            await tap('#wo-ch-cg-floors');
+            if (!await evaluate("document.activeElement.id==='wo-ch-cg-floors'")) throw new Error('CG floor input not touch-accessible: '+JSON.stringify(await evaluate("(() => {const n=document.querySelector('#wo-ch-cg-floors'),r=n.getBoundingClientRect();return {active:document.activeElement.outerHTML,open:n.closest('details').open,rect:{x:r.x,y:r.y,width:r.width,height:r.height},target:document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.outerHTML};})()")));
+            await tap('#wo-ch-defaults-open');
+            if (!await evaluate("!document.querySelector('[data-ch-view=\"defaults\"]').hidden && JSON.parse(document.querySelector('#wo-ch-default-state').value).mood==='平静'")) throw new Error('default-state touch did not open template');
+            await tap('#wo-ch-defaults-back');
             await tap('#wo-back');await tap('#wo-open-snapshot');
             if (!await evaluate("document.querySelector('#world-os').dataset.page==='snapshot'")) throw new Error('snapshot touch failed');
         });
@@ -304,7 +312,7 @@ try {
     await send('Runtime.evaluate', { expression: "if (!document.querySelector('#world-os').open) document.querySelector('#wo-launcher').click(); document.querySelector('#wo-back').click(); document.querySelector('.wo-window-body').scrollTop = 0; document.fonts.ready", awaitPromise:true, returnByValue:true });
     await send('Page.bringToFront');
     try {
-        for (const view of ['home', 'memory', 'calendar', 'calendar-time', 'characters', 'character-detail', 'relationships', 'character-api', 'character-debug', 'snapshot']) {
+        for (const view of ['home', 'memory', 'calendar', 'calendar-time', 'characters', 'character-detail', 'relationships', 'character-api', 'character-debug', 'snapshot', 'character-defaults', 'character-cg', 'cg-chat']) {
             if (view === 'memory') await send('Runtime.evaluate', { expression: "document.querySelector('#wo-open-floor-memory').click(); for (const section of document.querySelectorAll('#floor-memory details')) section.open = false; document.querySelector('.wo-window-body').scrollTop = 0;", returnByValue:true });
             if (view === 'calendar') await send('Runtime.evaluate', { expression: "document.querySelector('#wo-open-calendar').click(); document.querySelector('.wo-window-body').scrollTop = 0;", returnByValue:true });
             if (view === 'calendar-time') await send('Runtime.evaluate', { expression: "document.querySelector('#world-os').close(); document.querySelector('#wo-calendar-quick').click();", returnByValue:true });
@@ -314,6 +322,9 @@ try {
             if (view === 'character-api') await send('Runtime.evaluate',{expression:"document.querySelector('[data-ch-tab=\"api\"]').click();",returnByValue:true});
             if (view === 'character-debug') await send('Runtime.evaluate',{expression:"document.querySelector('[data-ch-tab=\"debug\"]').click();",returnByValue:true});
             if (view === 'snapshot') await send('Runtime.evaluate',{expression:"document.querySelector('#wo-open-snapshot').click();",returnByValue:true});
+            if (view === 'character-defaults') await send('Runtime.evaluate',{expression:"globalThis.__showDefaultStateFixture()",returnByValue:true});
+            if (view === 'character-cg') await send('Runtime.evaluate',{expression:"globalThis.__showCGFixture()",returnByValue:true});
+            if (view === 'cg-chat') await send('Runtime.evaluate',{expression:"globalThis.__showCGChatFixture()",returnByValue:true});
             await sleep(40);
             const screenshot = await send('Page.captureScreenshot', { format:'png', captureBeyondViewport:false });
             await writeFile(resolve(artifacts, artifactPrefix + '-' + view + '-preview.png'), Buffer.from(screenshot.data, 'base64'));

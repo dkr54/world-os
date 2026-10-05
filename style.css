@@ -300,3 +300,38 @@
 #world-os .wo-ch-search { flex-direction:row; }
 #world-os .wo-characters-icon { background:rgba(50,162,128,.2); }
 #world-os .wo-snapshot-icon { background:rgba(109,133,202,.2); }
+
+
+/* CG settings remain usable in a narrow mobile detail view. */
+#world-os .wo-ch-display-options { margin:10px 0; }
+#world-os .wo-ch-display-options input { max-width:160px; }
+#world-os .wo-ch-cgs { display:grid; gap:14px; margin:12px 0; }
+#world-os .wo-ch-cg-card { display:grid; grid-template-columns:120px minmax(0,1fr); gap:14px; padding:12px; border:1px solid rgba(128,128,128,.25); border-radius:10px; }
+#world-os .wo-ch-cg-picture { display:flex; align-items:center; justify-content:center; min-height:100px; align-self:start; background:rgba(128,128,128,.08); border-radius:8px; overflow:hidden; font-size:1.4em; }
+#world-os .wo-ch-cg-picture img { display:block; max-width:100%; max-height:200px; object-fit:contain; }
+#world-os .wo-ch-cg-picture span { padding:10px; font-size:.65em; }
+#world-os .wo-ch-cg-controls { min-width:0; display:flex; flex-direction:column; gap:10px; }
+#world-os .wo-ch-cg-controls input { box-sizing:border-box; width:100%; min-width:0; }
+#world-os .wo-ch-cg-macro { overflow-wrap:anywhere; user-select:text; padding:6px 0; }
+#world-os .wo-ch-token-line { display:flex; align-items:center; flex-wrap:wrap; justify-content:space-between; gap:8px; margin:12px 0; }
+#world-os #wo-ch-tokens { font-variant-numeric:tabular-nums; }
+/* Only chat messages receive rendered images; editors and prompt text keep their raw macros. */
+#chat .mes_text .wo-cg-render { display:inline-block; max-width:100%; vertical-align:middle; }
+#chat .mes_text .wo-cg-image { display:block; width:auto; height:auto; max-width:100%; max-height:65vh; object-fit:contain; border-radius:8px; }
+#chat .mes_text .wo-cg-unavailable { font:inherit; opacity:.7; overflow-wrap:anywhere; }
+@media(max-width:600px) {
+    #world-os .wo-ch-cg-card { grid-template-columns:minmax(0,1fr); padding:10px; }
+    #world-os .wo-ch-cg-picture { width:100%; min-height:96px; }
+    #world-os .wo-ch-cg-picture img { max-height:180px; }
+}
+
+#world-os .wo-ch-create-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+#world-os .wo-ch-create-actions .menu_button { margin:0; white-space:nowrap; }
+#world-os #wo-ch-default-form { display:flex; flex-direction:column; gap:12px; }
+#world-os #wo-ch-default-state { width:100%; box-sizing:border-box; min-height:240px; resize:vertical; }
+@media(max-width:600px) {
+    #world-os .wo-ch-heading { align-items:stretch; flex-direction:column; margin-bottom:14px; }
+    #world-os .wo-ch-heading p { margin-bottom:4px; }
+    #world-os .wo-ch-create-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+    #world-os .wo-ch-create-actions .menu_button { min-height:44px; width:100%; box-sizing:border-box; }
+}
