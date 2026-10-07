@@ -1,6 +1,6 @@
 {
   "name": "world-os",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "type": "module",
   "description": "world os 世界操作系统：楼层记忆、自定义日历、角色目录、状态与关系管理。",

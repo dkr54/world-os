@@ -210,7 +210,7 @@ async function planInjection(prompt, type, signal) {
     return output;
 }
 
-globalThis.floorMemoryInterceptor = async (prompt, _contextSize, abort, type = 'normal') => {
+const applyFloorMemoryToPrompt = async (prompt, _contextSize, abort, type = 'normal') => {
     let job;
     try {
         if (!worldEnabled(context())) return;
@@ -229,6 +229,35 @@ globalThis.floorMemoryInterceptor = async (prompt, _contextSize, abort, type = '
     } finally {
         activeGeneration = false;
         if (job) jobs.delete(job);
+    }
+};
+
+// TauriTavern can dispatch the same global interceptor for both an enabled install
+// and a disabled legacy manifest. A request array must be transformed only once.
+const promptRuns = new WeakMap();
+globalThis.floorMemoryInterceptor = async (prompt, contextSize, abort, type = 'normal') => {
+    let run;
+    try {
+        const ctx = context(), scope = scopeOf(ctx), previous = promptRuns.get(prompt);
+        const sameRun = previous && previous.revision === revision && previous.scope === scope
+            && previous.chat === ctx.chat && previous.metadata === ctx.chatMetadata && previous.type === type;
+        if (sameRun) {
+            run = previous;
+        } else {
+            run = { revision, scope, chat: ctx.chat, metadata: ctx.chatMetadata, type, aborted: false };
+            run.promise = applyFloorMemoryToPrompt(prompt, contextSize, () => { run.aborted = true; }, type);
+            promptRuns.set(prompt, run);
+        }
+        // Overlapping dispatches share the in-flight operation, including cancellation.
+        await run.promise;
+        if (run.aborted) abort(true);
+    } catch (error) {
+        if (run) run.aborted = true;
+        abort(true);
+        notice('本次生成已暂停：' + error.message);
+    } finally {
+        // Failed work must remain retryable after the caller corrects its input.
+        if (run?.aborted && promptRuns.get(prompt) === run) promptRuns.delete(prompt);
     }
 };
 

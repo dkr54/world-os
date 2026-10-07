@@ -430,6 +430,70 @@ try {
         assert((await state()).calls.length === count, 'network used when keywords filled K');
         ctx.extensionSettings[MODULE_KEY].recallCount = 2;
     });
+    await check('旧版已禁用但安装清单仍在时，同一生成只压缩一次且不重复请求向量', async () => {
+        const before = JSON.stringify(ctx.chat), prompt = promptFor(), savedDisabled = ctx.extensionSettings.disabledExtensions;
+        const manifests = [
+            { id:'third-party/legacy-world-os', generate_interceptor:'floorMemoryInterceptor' },
+            { id:'third-party/world-os', generate_interceptor:'floorMemoryInterceptor' },
+        ];
+        ctx.extensionSettings.disabledExtensions = ['third-party/legacy-world-os'];
+        let first, callsAfterFirst, dispatched = 0, aborted = false;
+        try {
+            // TauriTavern v2.3.0 iterates both manifests and resolves the same global name.
+            for (const manifest of manifests.filter(item => item.generate_interceptor)) {
+                await globalThis[manifest.generate_interceptor](prompt, 32000, () => { aborted = true; }, 'normal');
+                dispatched++;
+                if (dispatched === 1) {
+                    first = JSON.stringify(prompt);
+                    callsAfterFirst = (await state()).calls.length;
+                }
+            }
+            assert(dispatched === 2 && !aborted, 'disabled legacy manifest caused a second-pass abort');
+            assert(prompt.length < ctx.chat.length && prompt.some(m => m.mes.startsWith('[近期召回')), 'memory compression was skipped');
+            assert(JSON.stringify(prompt) === first, 'second dispatch recompressed the output');
+            assert((await state()).calls.length === callsAfterFirst, 'duplicate dispatch repeated vector requests');
+            assert(JSON.stringify(ctx.chat) === before, 'duplicate dispatch mutated saved chat');
+        } finally {
+            if (savedDisabled === undefined) delete ctx.extensionSettings.disabledExtensions;
+            else ctx.extensionSettings.disabledExtensions = savedDisabled;
+        }
+    });
+    await check('同一提示词的重叠调用共用正在执行的处理，不互相取消', async () => {
+        const prompt = promptFor(), before = JSON.stringify(ctx.chat);
+        const callsBefore = (await state()).calls.length;
+        const result = await Promise.all([generate('normal',prompt),generate('normal',prompt)]);
+        assert(result[0] === prompt && result[1] === prompt, 'dispatch did not share request array');
+        assert(prompt.filter(m => m.mes.startsWith('[近期召回')).length === 2, 'summaries were duplicated or lost');
+        assert((await state()).calls.length === callsBefore + 1, 'overlapping calls did not share vector query');
+        assert(JSON.stringify(ctx.chat) === before, 'overlapping dispatch changed source chat');
+    });
+    await check('下一次生成即使复用数组也会重新处理，不沿用上一轮去重结果', async () => {
+        const config = ctx.extensionSettings[MODULE_KEY], previousN = config.recentCount;
+        const prompt = await generate();
+        try {
+            config.recentCount = 1;
+            prompt.splice(0,prompt.length,...promptFor());
+            emit('GENERATION_STARTED','normal',{},false);
+            await generate('normal',prompt);
+            assert(document.querySelector('#fm-preview-output').textContent.includes('最近原文 N：第 8 楼'), 'new generation reused previous plan');
+            assert(prompt.some(m => m.mes.startsWith('[近期召回 · 第 7 楼]')), 'new generation did not apply changed N');
+        } finally {
+            config.recentCount = previousN;
+            emit('GENERATION_ENDED');
+        }
+    });
+    await check('真正无法对应的提示词仍会暂停，修正后可重试同一数组', async () => {
+        const prompt = promptFor(), originalChat = JSON.stringify(ctx.chat);
+        prompt[0].name = 'Unmatched sender';
+        const before = JSON.stringify(prompt);
+        let aborted = false;
+        await globalThis.floorMemoryInterceptor(prompt,32000,() => { aborted = true; },'normal');
+        assert(aborted, 'unsafe mapping was silently accepted');
+        assert(JSON.stringify(prompt) === before && JSON.stringify(ctx.chat) === originalChat, 'failed mapping changed prompt or chat');
+        prompt.splice(0,prompt.length,...promptFor());
+        await generate('normal',prompt);
+        assert(prompt.some(m => m.mes.startsWith('[近期召回')), 'failed pass incorrectly suppressed corrected retry');
+    });
     await check('手工总结独立保存；恢复正则总结后保留关键词与其召回能力', async () => {
         document.querySelector('#fm-records-panel').open = true;
         const card = document.querySelectorAll('.fm-record')[3];
