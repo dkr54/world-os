@@ -1,9 +1,9 @@
 {
   "name": "world-os",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
-  "description": "world os 世界操作系统：楼层记忆、自定义日历、角色目录、状态与关系管理。",
+  "description": "world os 世界操作系统：楼层记忆、自定义日历、角色目录、CG 图片包、状态管理与实验室。",
   "scripts": {
     "test": "node --test tests/*.test.js",
     "test:browser": "node tests/browser-runner.js",

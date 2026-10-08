@@ -1,6 +1,7 @@
 /** CG assets stay in shared character settings. Only rendered chat DOM is changed. */
 export const CG_PATTERN = /\{\{(0|[1-9]\d*)\.([^{}\r\n<>]{1,100})\}\}/g;
 export const MAX_CG_SOURCE = 2000000;
+export const MAX_CG_IMAGES = 200;
 export const DEFAULT_CG_FLOORS = 10;
 export function validateCGFloors(value = DEFAULT_CG_FLOORS) {
     if (!Number.isInteger(value) || value < 0 || value > 1000) throw new Error('CG 显示楼数必须为 0～1000 的整数。');
@@ -27,18 +28,57 @@ export function validateCGSource(value) {
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('CG 图片地址格式不受支持。');
     return value;
 }
+function validateCGName(name) {
+    if (typeof name !== 'string' || !name.trim() || name !== name.trim() || name.length > 100 || /[{}<>\u0000-\u001f\u007f]/.test(name)) {
+        throw new Error('CG 包名需要 1～100 个字，不能含花括号、尖括号、控制字符或首尾空格。');
+    }
+    return name;
+}
 export function validateCGs(value = []) {
-    if (!Array.isArray(value) || value.length > 200) throw new Error('每个角色最多设置 200 张 CG。');
-    const seen = new Set();
-    return value.map(item => {
-        if (!item || typeof item !== 'object' || typeof item.name !== 'string' || !item.name.trim()
-            || item.name !== item.name.trim() || item.name.length > 100 || /[{}<>\u0000-\u001f\u007f]/.test(item.name)) {
-            throw new Error('CG 名称需要 1～100 个字，不能含花括号、尖括号、控制字符或首尾空格。');
+    if (!Array.isArray(value) || value.length > MAX_CG_IMAGES) throw new Error('每个角色最多设置 200 个 CG 图片包，共 200 张图片。');
+    const reserved = new Set(), groups = new Map(), packs = []; let total = 0;
+    for (const item of value) {
+        validateCGName(item?.name);
+        if (reserved.has(item.name)) throw new Error('同一个角色的 CG 包名不能重复：' + item.name);
+        reserved.add(item.name);
+    }
+    for (const item of value) {
+        const legacy = !Object.hasOwn(item,'images'), sources = legacy ? [item.src] : item.images;
+        if (!Array.isArray(sources) || !sources.length) throw new Error('CG 图片包至少需要一张图片：' + item.name);
+        total += sources.length;
+        if (total > MAX_CG_IMAGES) throw new Error('每个角色的 CG 图片合计不能超过 200 张。');
+        const images = sources.map(validateCGSource);
+        // Strip only a legacy image's trailing digits. Explicitly named new packs stay intact.
+        const base = legacy ? item.name.match(/^(.*\D)[0-9]+$/)?.[1].trim() : null;
+        if (base) {
+            let pack = groups.get(base);
+            if (!pack) {
+                let name = base, suffix = 1;
+                while (reserved.has(name)) {
+                    const tail = '（旧图包' + (suffix === 1 ? '' : suffix) + '）'; suffix++;
+                    name = base.slice(0,100-tail.length) + tail;
+                }
+                reserved.add(name); pack = { name,images:[],aliases:[] }; groups.set(base,pack); packs.push(pack);
+            }
+            // Aliases contain image indexes, not duplicate Base64 data, and preserve old chat macros.
+            pack.aliases.push({ name:item.name,index:pack.images.length }); pack.images.push(...images);
+        } else {
+            const pack = { name:item.name,images }, aliases = item.aliases ?? [];
+            if (!Array.isArray(aliases) || aliases.length > MAX_CG_IMAGES) throw new Error('旧 CG 宏映射格式无效。');
+            if (aliases.length) pack.aliases = aliases.map(alias => {
+                validateCGName(alias?.name);
+                if (!Number.isInteger(alias.index) || alias.index < 0 || alias.index >= images.length) throw new Error('旧 CG 宏指向了不存在的图片。');
+                return { name:alias.name,index:alias.index };
+            });
+            packs.push(pack);
         }
-        if (seen.has(item.name)) throw new Error('同一个角色的 CG 名称不能重复：' + item.name);
-        seen.add(item.name);
-        return { name:item.name,src:validateCGSource(item.src) };
-    });
+    }
+    const macroNames = new Set(packs.map(pack => pack.name));
+    for (const pack of packs) for (const alias of pack.aliases ?? []) {
+        if (macroNames.has(alias.name)) throw new Error('CG 包名或旧图片宏重复：' + alias.name);
+        macroNames.add(alias.name);
+    }
+    return packs;
 }
 export function cgMacro(character, cg) { return '{{' + character.cgId + '.' + cg.name + '}}'; }
 export function cgCharacterPrompt(character) {
@@ -49,11 +89,38 @@ export function cgCharacterPrompt(character) {
 export function cgPrompt(characters) { return characters.map(cgCharacterPrompt).filter(Boolean).join('\n\n'); }
 export function cgLookup(characters) {
     const lookup = new Map();
-    for (const character of characters) for (const cg of character.cgs ?? []) {
+    for (const character of characters) {
         if (!Number.isSafeInteger(character.cgId) || character.cgId < 0) continue;
-        try { lookup.set(cgMacro(character,cg),{ src:validateCGSource(cg.src),name:character.name,cg:cg.name }); } catch { /* Keep invalid assets as text. */ }
+        try {
+            for (const pack of validateCGs(character.cgs ?? [])) {
+                lookup.set(cgMacro(character,pack),{ images:pack.images,name:character.name,cg:pack.name });
+                for (const alias of pack.aliases ?? []) lookup.set(cgMacro(character,alias),{
+                    images:[pack.images[alias.index]],name:character.name,cg:pack.name,
+                });
+            }
+        } catch { /* Keep invalid assets as text. */ }
     }
     return lookup;
+}
+/** Pick once per message/swipe/pack, including DOM recycling and streaming redraws. */
+export function createCGPicker(random = Math.random) {
+    let messages = new WeakMap();
+    return {
+        clear() { messages = new WeakMap(); },
+        pick(message, macro, images) {
+            if (!images?.length) return null;
+            const swipe = message.swipe_id ?? 0;
+            let entry = messages.get(message);
+            if (!entry || entry.swipe !== swipe) {
+                entry = { swipe,choices:new Map() }; messages.set(message,entry);
+            }
+            const previous = entry.choices.get(macro);
+            if (images.includes(previous)) return previous;
+            const source = images[Math.min(images.length - 1,Math.max(0,Math.floor(random() * images.length) || 0))];
+            entry.choices.set(macro,source);
+            return source;
+        },
+    };
 }
 export async function readCGFile(file) {
     if (!['image/png','image/jpeg','image/webp','image/gif'].includes(file.type) || file.size > 12 * 1024 * 1024) {
@@ -79,7 +146,8 @@ export async function readCGFile(file) {
 }
 
 export function mountCGRenderer({ getContext, getDirectory, getLimit = () => DEFAULT_CG_FLOORS, enabled, changeEvent }) {
-    let chatRoot = null, frame = null, force = false, scope = '', lookup = new Map(), directory = null;
+    let chatRoot = null, frame = null, force = false, scope = '', lookup = new Map(), directory = null, metadata = null;
+    const picker = createCGPicker();
     const dirty = new Set(), owned = new WeakMap();
     let visible = new Set(), windowKey = '';
     const scopeOf = ctx => JSON.stringify([ctx.groupId ?? null,ctx.characterId,ctx.characters?.[ctx.characterId]?.avatar,ctx.chatId]);
@@ -100,7 +168,8 @@ export function mountCGRenderer({ getContext, getDirectory, getLimit = () => DEF
         // Refresh owned nodes on card switches, changed settings, or recycled mobile message elements.
         for (const wrapper of box.querySelectorAll('.wo-cg-render')) {
             const info = owned.get(wrapper), asset = info && lookup.get(info.macro);
-            if (info && (reset || info.index !== index || !asset || asset.src !== info.src)) {
+            const source = asset && picker.pick(ctx.chat[index],info.macro,asset.images);
+            if (info && (reset || info.index !== index || !asset || source !== info.src)) {
                 wrapper.replaceWith(document.createTextNode(info.macro));
             }
         }
@@ -126,12 +195,13 @@ export function mountCGRenderer({ getContext, getDirectory, getLimit = () => DEF
         gather(box);
         for (const run of runs) for (const match of [...run.text.matchAll(CG_PATTERN)].reverse()) {
             const asset = lookup.get(match[0]); if (!asset) continue;
+            const source = picker.pick(ctx.chat[index],match[0],asset.images);
             const begin = run.nodes.find(item => match.index >= item.start && match.index < item.end);
             const finish = run.nodes.find(item => match.index + match[0].length > item.start && match.index + match[0].length <= item.end);
             if (!begin || !finish) continue;
             const wrapper = document.createElement('span'), img = document.createElement('img');
             wrapper.className = 'wo-cg-render'; wrapper.title = match[0];
-            owned.set(wrapper,{ macro:match[0],src:asset.src,index });
+            owned.set(wrapper,{ macro:match[0],src:source,index });
             img.className = 'wo-cg-image'; img.alt = asset.name + ' · ' + asset.cg;
             img.loading = 'lazy'; img.decoding = 'async'; img.referrerPolicy = 'no-referrer';
             img.addEventListener('error',() => {
@@ -139,7 +209,7 @@ export function mountCGRenderer({ getContext, getDirectory, getLimit = () => DEF
                 wrapper.replaceChildren(document.createTextNode(match[0]));
                 wrapper.classList.add('wo-cg-unavailable'); wrapper.title = 'CG 图片加载失败：' + match[0];
             },{once:true});
-            img.src = asset.src; wrapper.append(img);
+            img.src = source; wrapper.append(img);
             const range = document.createRange();
             range.setStart(begin.node,match.index-begin.start);
             range.setEnd(finish.node,match.index+match[0].length-finish.start);
@@ -176,7 +246,9 @@ export function mountCGRenderer({ getContext, getDirectory, getLimit = () => DEF
         const nextVisible = recentCGIndices(ctx.chat,getLimit(ctx)), nextWindow = [...nextVisible].join(',');
         if (nextWindow !== windowKey) { windowKey = nextWindow; if (chatRoot) collect(chatRoot); }
         visible = nextVisible;
-        const reset = force || scope !== nextScope || directory !== nextDirectory;
+        const switched = scope !== nextScope || metadata !== ctx.chatMetadata;
+        if (switched) { picker.clear(); metadata = ctx.chatMetadata; }
+        const reset = force || switched || directory !== nextDirectory;
         if (reset) {
             scope = nextScope; directory = nextDirectory; lookup = cgLookup(directory);
             if (chatRoot) collect(chatRoot);

@@ -275,6 +275,7 @@
       <div class="wo-ch-view" data-ch-view="list">
         <div class="wo-ch-heading"><div><h3>角色</h3><p id="wo-ch-count" class="fm-hint"></p></div><div class="wo-ch-create-actions"><button type="button" id="wo-ch-add" class="menu_button"><i class="fa-solid fa-user-plus" aria-hidden="true"></i> 新建角色</button><button type="button" id="wo-ch-defaults-open" class="menu_button"><i class="fa-solid fa-sliders" aria-hidden="true"></i> 默认状态</button></div></div>
         <label class="wo-ch-search"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input id="wo-ch-search" class="text_pole" placeholder="搜索角色姓名或关键词" aria-label="搜索角色"></label>
+        <p class="fm-hint wo-ch-match-legend"><span class="is-enabled">● 参与关键词匹配</span><span class="is-disabled">● 未参与（关闭或无关键词）</span></p>
         <details class="wo-ch-display-options"><summary>聊天 CG 显示范围</summary>
           <label>只显示最近 N 楼的 CG<input id="wo-ch-cg-floors" class="text_pole" type="number" min="0" max="1000" step="1" value="10" inputmode="numeric"></label>
           <p class="fm-hint">全局设置，修改即保存。用户消息和 AI 回复各算一楼，默认 10；0 为不显示。更早的楼层恢复显示图片宏，不改动原始消息。</p>
@@ -303,11 +304,11 @@
           <label>触发关键词<input id="wo-ch-keywords" class="text_pole" placeholder="示例角色甲,角色甲"></label>
           <p class="fm-hint">英文逗号分隔；中文逗号视为关键词的一部分。留空不匹配。查询直接使用最新两条用户或 AI 消息。</p>
           <details><summary>角色图片</summary><label>图片网址<input id="wo-ch-avatar" class="text_pole" placeholder="https://…"></label><label>或从手机选择图片<input id="wo-ch-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label><p class="fm-hint">上传图片会缩小后保存，快照也会包含上传头像。</p><button id="wo-ch-avatar-clear" type="button" class="menu_button">移除图片</button></details>
-          <details id="wo-ch-cg-section"><summary>角色 CG</summary>
-            <p class="fm-hint">每张 CG 设置一个名称，并上传图片或填写 HTTP(S) 图片地址。CG 与角色设定一起保存；可在回复中使用下方图片宏。原始聊天与编辑内容始终保留宏文本。</p>
+          <details id="wo-ch-cg-section"><summary>角色 CG 图片包</summary>
+            <p class="fm-hint">每个包设置一个包名，可一次选择多张图片，也可添加 HTTP(S) 图片地址。回复中的 {{id.包名}} 会随机显示包内一张图片，同一楼同一包在本次打开聊天期间保持选图稳定。原始聊天与编辑内容始终保留宏文本。</p>
             <div id="wo-ch-cgs" class="wo-ch-cgs"></div>
-            <div class="fm-actions"><button id="wo-ch-cg-add" type="button" class="menu_button"><i class="fa-solid fa-image" aria-hidden="true"></i> 添加 CG</button><button id="wo-ch-copy-cg" type="button" class="menu_button">复制预设宏 {{CG}}</button></div>
-            <p class="fm-hint">在聊天预设中加入 {{CG}}，列出本轮命中角色的所有 CG 宏。小图片保留原文件；大图片会缩小保存，大 GIF 请使用图片地址。上传图片会随状态快照保存。</p>
+            <div class="fm-actions"><button id="wo-ch-cg-add" type="button" class="menu_button"><i class="fa-solid fa-images" aria-hidden="true"></i> 添加图片包</button><button id="wo-ch-copy-cg" type="button" class="menu_button">复制预设宏 {{CG}}</button></div>
+            <p class="fm-hint">保存角色设定后生效。{{CG}} 只列出本轮命中角色的图片包宏，不列出包内文件。旧 CG 按末尾数字归包，如“休闲装1、休闲装2”合并为“休闲装”；无数字后缀则保留为同名单图包。历史图片宏继续可用。每个角色合计最多 200 张图片；大图片会缩小保存，大 GIF 请使用图片地址。图片包与上传图片均随状态快照保存。</p>
           </details>
           <label>基础设定<textarea id="wo-ch-description" class="text_pole" rows="5" placeholder="年龄：{{age}}；身高：{{heigh}}；与苏岚的关系：{{relationship.苏岚}}"></textarea></label>
           <details><summary>分阶段设定</summary>
@@ -334,10 +335,6 @@
           <p class="fm-hint">统计已保存设定、当前匹配阶段与状态宏替换后的文本，包含角色标签，使用宿主当前分词器。该角色命中时占用这部分上下文；不包含独立的 CG 列表和其他提示词。</p>
           <pre id="wo-ch-preview" class="fm-output"></pre>
         </details>
-      </div>
-      <div class="wo-ch-view" data-ch-view="relations" hidden>
-        <h3>角色关系</h3><p class="fm-hint">箭头从当前角色指向关系对象。点选角色后可查看详情；下方列出完整描述。</p>
-        <div id="wo-ch-graph" class="wo-ch-graph" aria-label="角色关系有向图"></div><div id="wo-ch-relations"></div>
       </div>
       <div class="wo-ch-view" data-ch-view="api" hidden>
         <h3>状态模型</h3><p class="fm-hint">独立使用兼容 OpenAI 的聊天接口。填写地址和密钥后会拉取模型列表，也可手动填写模型名。</p>
@@ -380,7 +377,6 @@
       </div>
       <nav class="wo-ch-nav" aria-label="角色目录导航">
         <button type="button" class="menu_button" data-ch-tab="list" aria-current="page"><i class="fa-solid fa-address-book" aria-hidden="true"></i><span>角色</span></button>
-        <button type="button" class="menu_button" data-ch-tab="relations"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i><span>关系</span></button>
         <button type="button" class="menu_button" data-ch-tab="api"><i class="fa-solid fa-sliders" aria-hidden="true"></i><span>接口</span></button>
         <button type="button" class="menu_button" data-ch-tab="debug"><i class="fa-solid fa-bug" aria-hidden="true"></i><span>调试</span></button>
       </nav>

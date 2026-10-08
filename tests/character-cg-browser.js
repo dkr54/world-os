@@ -12,24 +12,30 @@ export async function runCGChecks({check,assert,waitFor,delay,emit,getContext,se
         q('wo-ch-search').value=String(person().cgId);q('wo-ch-search').dispatchEvent(new Event('input'));
         q('wo-ch-list').querySelector('.wo-ch-contact').click();
     };
-    const choose=async(row,name,color)=>{
-        const canvas=document.createElement('canvas');canvas.width=240;canvas.height=140;
-        const paint=canvas.getContext('2d');paint.fillStyle=color;paint.fillRect(0,0,240,140);
-        paint.fillStyle='#ffffff';paint.font='28px sans-serif';paint.fillText(name,30,80);
-        const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
-        const transfer=new DataTransfer();transfer.items.add(new File([blob],name+'.png',{type:'image/png'}));
+    const chooseMany=async(row,pictures)=>{
+        const before=row.cgValue.images.length,transfer=new DataTransfer();
+        for(const [name,color]of pictures){
+            const canvas=document.createElement('canvas');canvas.width=240;canvas.height=140;
+            const paint=canvas.getContext('2d');paint.fillStyle=color;paint.fillRect(0,0,240,140);
+            paint.fillStyle='#ffffff';paint.font='28px sans-serif';paint.fillText(name,30,80);
+            const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
+            transfer.items.add(new File([blob],name+'.png',{type:'image/png'}));
+        }
         const input=row.querySelector('[data-cg-file]');input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));
-        await waitFor(()=>row.cgValue.src.startsWith('data:image/'),'CG file upload');
+        assert(input.multiple,'CG input does not accept multiple files');
+        await waitFor(()=>row.cgValue.images.length===before+pictures.length,'CG batch upload');
     };
+    const choose=(row,name,color)=>chooseMany(row,[[name,color]]);
     let source,tokenInput;
     await check('角色 CG 从手机文件选择、保存并随快照保留，数字 ID 稳定，预设只列出命中角色',async()=>{
         assert(person().cgId===0,'first character ID not 0');
         openMain();assert(q('wo-ch-id').readOnly&&q('wo-ch-id').value==='0','numeric ID not visible and stable');
         q('wo-ch-cg-section').open=true;
-        q('wo-ch-cg-add').click();await choose(q('wo-ch-cgs').lastElementChild,'晨光','#385f73');
+        q('wo-ch-cg-add').click();await chooseMany(q('wo-ch-cgs').lastElementChild,[['晨光','#385f73'],['备用晨景','#854e4e']]);
         q('wo-ch-cg-add').click();await choose(q('wo-ch-cgs').lastElementChild,'重逢','#79624e');
         q('wo-ch-description').value+=' 可用图片 {{0.晨光}}。';
-        await submit();assert(person().cgs.length===2,q('wo-ch-status').textContent);source=person().cgs[0].src;
+        await submit();assert(person().cgs.length===2,q('wo-ch-status').textContent);source=person().cgs[0].images[0];
+        assert(person().cgs[0].images.length===2,'batch saved as individual packs');
         assert(person().cgId===0,'save changed numeric ID');
         ctx.chat=[{mes:'我遇见示例角色甲',is_user:true}];
         const cg=macros.get('CG')();
@@ -37,7 +43,7 @@ export async function runCGChecks({check,assert,waitFor,delay,emit,getContext,se
         assert(!cg.includes('data:image')&&!cg.includes('苏岚'),'CG leaked sources or uncalled characters');
         assert(macros.get('character')().includes('{{0.晨光}}'),'state macro expansion ate image macro');
         const snap=validateSnapshot(createSnapshot(ctx));
-        assert(snap.settings[CHARACTERS_KEY].cards[owner].find(p=>p.id===mainId).cgs[0].src===source,'snapshot lost image');
+        assert(JSON.stringify(snap.settings[CHARACTERS_KEY].cards[owner].find(p=>p.id===mainId).cgs)===JSON.stringify(person().cgs),'snapshot lost pack images');
         q('wo-ch-cg-section').open=true;
         const body=q('world-os').querySelector('.wo-window-body');
         assert(body.scrollWidth<=body.clientWidth+1,'mobile CG form overflow');
@@ -83,11 +89,22 @@ export async function runCGChecks({check,assert,waitFor,delay,emit,getContext,se
         await waitFor(()=>images().length===2,'N=2 rendering');
         assert(!boxes()[0].querySelector('img')&&!boxes()[1].querySelector('img'),'old images were retained');
         assert(boxes()[0].textContent.includes('{{0.晨光}}'),'old macro disappeared');
-        assert(images()[0].src===source,'wrong CG source');
+        assert(person().cgs[0].images.includes(images()[0].src),'selected CG not in pack');
         assert(JSON.stringify(ctx.chat)===before,'renderer changed raw messages');
         assert(outside.textContent==='{{0.晨光}}'&&!outside.querySelector('img'),'CG rendered outside chat');
         assert(ctx.extensionSettings[CHARACTERS_KEY].cgRenderCount===2,'N did not persist');
         const snapshot=validateSnapshot(createSnapshot(ctx));assert(snapshot.settings[CHARACTERS_KEY].cgRenderCount===2,'N missing from snapshot');
+    });
+    await check('随机图片包在重绘、流式追加和设置刷新时保持选图，删除所选图片才更换',async()=>{
+        const box=boxes()[3], chosen=box.querySelector('img').src, raw=JSON.stringify(ctx.chat), pack=person().cgs[0];
+        box.textContent=ctx.chat[3].mes;emit('MESSAGE_UPDATED',3);
+        await waitFor(()=>box.querySelector('img'),'pack redraw');assert(box.querySelector('img').src===chosen,'redraw rerolled image');
+        box.append(document.createTextNode(' 流式追加'));await delay(60);assert(box.querySelector('img').src===chosen,'streaming rerolled image');
+        announceWorldChange();await delay(80);assert(box.querySelector('img').src===chosen,'settings refresh rerolled image');
+        const original=[...pack.images];pack.images=original.filter(src=>src!==chosen);announceWorldChange();
+        await waitFor(()=>box.querySelector('img')?.src===pack.images[0],'removed image remained selected');
+        pack.images=original;announceWorldChange();await delay(60);
+        assert(JSON.stringify(ctx.chat)===raw,'random selection changed chat data');
     });
     await check('新楼层出现后移除过期图片，流式宏只在完整时渲染，编辑与重绘不改原文',async()=>{
         ctx.chat.push({mes:'后续 {{0.重',is_user:false});const row=block(4,ctx.chat[4].mes);chat.append(row);
@@ -136,6 +153,45 @@ export async function runCGChecks({check,assert,waitFor,delay,emit,getContext,se
         await delay(100);assert(!boxes()[4].querySelector('img')&&boxes()[4].textContent.includes('{{0.晨光}}'),'broken image retried or lost macro');
         boxes()[4].append(document.createTextNode(' 新文字'));await delay(60);
         assert(!boxes()[4].querySelector('img'),'failed source endlessly retries');
+    });
+    await check('向已有包追加、单张移除与无效批次回滚均不丢旧图',async()=>{
+        openMain();q('wo-ch-cg-section').open=true;const row=q('wo-ch-cgs').firstElementChild;
+        const before=[...row.cgValue.images];await choose(row,'追加图','#666666');
+        assert(row.cgValue.images.length===before.length+1,'append replaced old images');
+        row.querySelectorAll('[data-cg-remove]')[before.length].click();assert(JSON.stringify(row.cgValue.images)===JSON.stringify(before),'remove changed other images');
+        const input=row.querySelector('[data-cg-file]'), transfer=new DataTransfer();
+        const bytes=Uint8Array.from(atob(source.split(',')[1]),c=>c.charCodeAt(0));
+        transfer.items.add(new File([bytes],'valid.png',{type:'image/png'}));
+        transfer.items.add(new File(['bad'],'bad.txt',{type:'text/plain'}));
+        input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));
+        await waitFor(()=>!input.disabled&&q('wo-ch-status').textContent.includes('请选择'),'invalid upload not reported');
+        assert(JSON.stringify(row.cgValue.images)===JSON.stringify(before),'failed batch partially appended');
+        assert(input.value==='','failed batch cannot be reselected');
+        await submit();assert(JSON.stringify(person().cgs[0].images)===JSON.stringify(before),'save lost old images');
+    });
+    await check('旧 CG 自动按数字归包，旧图片宏固定指向原图，编辑与快照保留映射',async()=>{
+        const pair=[...person().cgs[0].images], legacyOwner='character:legacy-cg-card.png';
+        const legacy={...ctx,characters:[{avatar:'legacy-cg-card.png'}],chatId:'legacy-cg',chatMetadata:{},
+            chat:[{mes:'示例角色甲 {{0.休闲装}} {{0.休闲装1}} {{0.休闲装2}}'}],
+            extensionSettings:{...ctx.extensionSettings,[CHARACTERS_KEY]:{cards:{[legacyOwner]:[
+                {...person(),cgs:[{name:'休闲装1',src:pair[0]},{name:'休闲装2',src:pair[1]}]},
+            ]}}}};
+        try{
+            setContext(legacy);emit('CHAT_CHANGED');chat.replaceChildren(block(0,legacy.chat[0].mes));
+            const migrated=legacy.extensionSettings[CHARACTERS_KEY].cards[legacyOwner][0];
+            assert(migrated.cgs.length===1&&migrated.cgs[0].name==='休闲装','legacy images not grouped');
+            await waitFor(()=>images().length===3,'legacy macros not rendered');
+            assert(images()[1].src===pair[0]&&images()[2].src===pair[1],'old macros lost original image');
+            const prompt=macros.get('CG')();assert(prompt.includes('{{0.休闲装}}')&&!prompt.includes('{{0.休闲装1}}'),'old image names leaked into CG manifest');
+            q('wo-open-characters').click();document.querySelector('[data-ch-tab="list"]').click();
+            q('wo-ch-list').querySelector('.wo-ch-contact').click();q('wo-ch-cg-section').open=true;
+            q('wo-ch-cgs').firstElementChild.querySelector('[data-cg-remove]').click();await submit();
+            await waitFor(()=>images().length===2,'removed legacy image remained rendered');
+            assert(boxes()[0].textContent.includes('{{0.休闲装1}}'),'deleted image macro changed meaning');
+            assert(images()[1].src===pair[1],'surviving alias index not adjusted');
+            const pack=validateSnapshot(createSnapshot(legacy)).settings[CHARACTERS_KEY].cards[legacyOwner][0].cgs[0];
+            assert(pack.aliases[0].name==='休闲装2'&&pack.aliases[0].index===0,'snapshot lost legacy mapping');
+        }finally{setContext(ctx);emit('CHAT_CHANGED');}
     });
     await setLimit(2);
     chat.replaceChildren();outside.remove();ctx.chat=[{mes:'我和示例角色甲谈起苏岚。',is_user:true}];emit('CHAT_CHANGED');

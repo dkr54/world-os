@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CHARACTERS_KEY, validateCharacter, validateDirectory, validateState, currentState, selectCharacters, recentCharacterQuery,
-    defaultCharacterState, saveDefaultCharacterState, DEFAULT_CHARACTER_STATE, validateCharacterQueryCleanup, renderCharacter, applyStateOperations, stateDifference, relationshipsOf, sortedCharacters, safeJSON, getStateValue } from '../characters-core.js';
+    defaultCharacterState, saveDefaultCharacterState, DEFAULT_CHARACTER_STATE, validateCharacterQueryCleanup, renderCharacter, applyStateOperations, stateDifference, sortedCharacters, safeJSON, getStateValue } from '../characters-core.js';
 import { validateStateAPI, stateMessages, parseStateResponse, requestStateUpdate } from '../character-api.js';
 import { CharacterEngine } from '../characters-engine.js';
 import { createSnapshot, restoreSnapshot, validateSnapshot } from '../snapshots.js';
@@ -99,10 +99,7 @@ test('拒绝原型污染、任意指令字段、重复写入、父路径不存�
     ]);
     assert.equal(result.accepted.length,1);assert.equal(result.states.a.age,21);assert.equal({}.polluted,undefined);
 });
-test('关系图保留方向、完整描述和未建档关系对象；差异包含新增和删除',() => {
-    const p=person(), b=person({id:'b',name:'苏岚'});
-    assert.deepEqual(relationshipsOf([p,b],{a:p.baseState,b:{relationship:[{'未建档':'路人'}]}}),
-        [{source:'a',target:'b',name:'苏岚',description:'初识'},{source:'b',target:null,name:'未建档',description:'路人'}]);
+test('状态差异包含新增、删除和关系描述变更',() => {
     const diff=stateDifference({age:20,relationship:[{苏岚:'初识'}]},{affection:1,relationship:[{苏岚:'朋友'}]});
     assert(diff.some(item=>item.path==='age' && item.after===undefined));assert(diff.some(item=>item.path==='relationship.苏岚'));
 });

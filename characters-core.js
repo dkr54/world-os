@@ -189,7 +189,8 @@ export function ensureCharacterIDs(ctx) {
     const cards = { ...config.cards }, nextIds = { ...config.nextIds };
     for (const [owner,items] of Object.entries(cards)) {
         const first = Number.isSafeInteger(nextIds[owner]) && nextIds[owner] >= 0 ? nextIds[owner] : 0;
-        if (items.some(item => item.cgId === undefined || item.cgId === null || !Array.isArray(item.cgs))) {
+        if (items.some(item => item.cgId === undefined || item.cgId === null || !Array.isArray(item.cgs)
+            || item.cgs.some(cg => !Object.hasOwn(cg,'images')))) {
             cards[owner] = validateDirectory(items,first); changed = true;
         }
         const next = Math.max(first,...cards[owner].map(item => item.cgId + 1));
@@ -316,11 +317,6 @@ export function applyStateOperations(characters, states, operations) {
         } catch (error) { reject(error.message); }
     }
     return { states:result, accepted, ignored };
-}
-export function relationshipsOf(characters, states) {
-    const byName = new Map(characters.filter(character => characters.filter(item => item.name === character.name).length === 1).map(character => [character.name, character.id]));
-    return characters.flatMap(character => (states[character.id]?.relationship ?? []).flatMap(item =>
-        Object.entries(item).map(([name, description]) => ({ source:character.id, target:byName.get(name) ?? null, name, description }))));
 }
 export function stateDifference(before, after) {
     const left = new Map(stateFields(before).map(item => [item.path,item.value]));

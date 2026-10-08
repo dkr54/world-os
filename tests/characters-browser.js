@@ -22,7 +22,7 @@ export async function runCharacterChecks({ check, assert, waitFor, delay, emit, 
         q('wo-ch-add').click();q('wo-ch-name').value='示例角色甲';q('wo-ch-keywords').value='示例角色甲,角色甲';
         q('wo-ch-description').value='示例角色甲，年龄 {{age}}；身高 {{heigh}}；和苏岚是{{relationship.苏岚}}。';
         const canvas=document.createElement('canvas');canvas.width=canvas.height=128;
-        const paint=canvas.getContext('2d');paint.fillStyle='#437c75';paint.fillRect(0,0,128,128);paint.fillStyle='#effaf6';paint.font='60px sans-serif';paint.fillText('罗',34,86);
+        const paint=canvas.getContext('2d');paint.fillStyle='#437c75';paint.fillRect(0,0,128,128);paint.fillStyle='#effaf6';paint.font='60px sans-serif';paint.fillText('甲',34,86);
         const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
         const picture=new DataTransfer();picture.items.add(new File([blob],'avatar.png',{type:'image/png'}));
         q('wo-ch-avatar-file').files=picture.files;q('wo-ch-avatar-file').dispatchEvent(new Event('change',{bubbles:true}));
@@ -43,6 +43,21 @@ export async function runCharacterChecks({ check, assert, waitFor, delay, emit, 
         q('wo-ch-list-back').click();
         assert(q('wo-ch-list').querySelector('.wo-ch-contact strong').textContent==='示例角色甲','pinyin sorting incorrect');
         assert(q('wo-ch-list').querySelectorAll('.wo-ch-avatar').length===2,'avatars missing');
+    });
+    await check('列表红绿图标与匹配开关、空关键词同步，无需进入详情即可辨认',async()=>{
+        const first=()=>q('wo-ch-list').querySelector('.wo-ch-contact');
+        assert(first().querySelector('.wo-ch-match-status.is-enabled'),'enabled indicator missing');
+        const green=getComputedStyle(first().querySelector('.wo-ch-match-status')).color;
+        first().click();q('wo-ch-enabled').checked=false;await submit('wo-ch-definition-form');tab('list');
+        let indicator=first().querySelector('.wo-ch-match-status');
+        assert(indicator.classList.contains('is-disabled')&&indicator.getAttribute('aria-label').includes('已关闭'),'disabled status missing');
+        assert(getComputedStyle(indicator).color!==green,'red and green indicators use the same color');
+        first().click();q('wo-ch-enabled').checked=true;const keywords=q('wo-ch-keywords').value;q('wo-ch-keywords').value='';
+        await submit('wo-ch-definition-form');tab('list');
+        indicator=first().querySelector('.wo-ch-match-status');
+        assert(indicator.classList.contains('is-disabled')&&indicator.getAttribute('aria-label').includes('未设置关键词'),'empty keywords shown as participating');
+        first().click();q('wo-ch-keywords').value=keywords;await submit('wo-ch-definition-form');tab('list');
+        assert(first().querySelector('.wo-ch-match-status.is-enabled'),'restored matching status stale');
     });
     await check('角色宏使用原始最新两条消息，阶段和状态按当前聊天组装',async()=>{
         assert(macros.has('character'),'character macro not registered');
@@ -90,11 +105,12 @@ export async function runCharacterChecks({ check, assert, waitFor, delay, emit, 
         assert(ctx.chatMetadata[CHARACTERS_KEY].debug.ignored.length===2,'ignored operations not recorded');
         assert(macros.get('character')().includes('她已经信赖你'),'stage did not advance');
     });
-    await check('角色详情、关系有向图和调试页提供当前与上一轮状态',async()=>{
+    await check('图谱入口已移除，角色详情和调试仍提供关系状态与前后对比',async()=>{
         tab('list');q('wo-ch-list').querySelector('.wo-ch-contact').click();
         assert(q('wo-ch-current-state').value.includes('60'),'detail state stale');assert(q('wo-ch-stage-current').textContent.includes('信赖'),'stage label stale');
-        tab('relations');assert(q('wo-ch-graph').querySelector('path[marker-end]'),'directed arrow missing');
-        assert(q('wo-ch-relations').textContent.includes('示例角色甲 → 苏岚'),'direction description missing');
+        assert(!q('wo-ch-graph')&&!document.querySelector('[data-ch-tab="relations"]'),'removed graph still available');
+        assert(document.querySelectorAll('[data-ch-tab]').length===3,'bottom navigation is not three tabs');
+        assert(q('wo-ch-current-state').value.includes('relationship'),'graph removal deleted relationship state');
         tab('debug');const text=q('wo-ch-debug').textContent;
         assert(text.includes('上一轮：0')&&text.includes('当前：60'),'state comparison missing');
         assert(text.includes('被忽略的 AI 指令'),'rejected operation details missing');
@@ -104,10 +120,10 @@ export async function runCharacterChecks({ check, assert, waitFor, delay, emit, 
         q('wo-ch-current-state').value=JSON.stringify({age:21,heigh:'165cm',affection:30,relationship:[{苏岚:'伙伴'}]});
         await submit('wo-ch-state-form');assert(ctx.chatMetadata[CHARACTERS_KEY].states[mainId].age===21,status());
         q('wo-ch-manual-requirements').value='记录本轮帮助后的好感变化';
-        q('wo-ch-manual-update').click();await waitFor(()=>currentState(ctx,characters()[0]).affection===60,'manual update');
+        q('wo-ch-manual-update').click();await waitFor(()=>currentState(ctx,characters().find(item=>item.id===mainId)).affection===60,'manual update');
         const calls=(await fetch('/__state').then(r=>r.json())).characterCalls;assert(calls.at(-1).messages.some(item=>item.content.includes('记录本轮帮助后的好感变化')),'manual requirements absent');
         setContext({...ctx,chatId:'different-chat',chatMetadata:{}});emit('CHAT_CHANGED');
-        assert(currentState(getContext(),characters()[0]).age===20,'chat state leaked');
+        assert(currentState(getContext(),characters().find(item=>item.id===mainId)).age===20,'chat state leaked');
         setContext(ctx);emit('CHAT_CHANGED');
     });
     await check('world os 总开关同步首页与扩展页并停止三项功能的注入和自动调用',async()=>{
@@ -143,7 +159,7 @@ export async function runCharacterChecks({ check, assert, waitFor, delay, emit, 
         assert(!q('wo-ch-list').querySelector('img[src="x"]'),'search injected HTML');
         q('wo-ch-search').value='';q('wo-ch-search').dispatchEvent(new Event('input'));
         const body=q('world-os').querySelector('.wo-window-body');assert(body.scrollWidth<=body.clientWidth+1,'directory horizontal overflow');
-        const nav=q('wo-characters').querySelector('.wo-ch-nav');assert(nav.querySelectorAll('button').length===4,'bottom navigation incomplete');
+        const nav=q('wo-characters').querySelector('.wo-ch-nav');assert(nav.querySelectorAll('button').length===3,'bottom navigation incomplete');
     });
     const { runCGChecks } = await import('./character-cg-browser.js');
     await runCGChecks({check,assert,waitFor,delay,emit,getContext,setContext,macros,mainId});

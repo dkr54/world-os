@@ -1,12 +1,12 @@
 import { calendarOwner, calendarChat } from './calendar-core.js';
 import { CHARACTERS_KEY, cloneJSON, directoryOf, currentState, validateCharacter, validateDirectory, validateState,
-    sortedCharacters, characterInitial, renderCharacter, stateFields, valueType, relationshipsOf, stateDifference, CONDITION_OPS,
+    sortedCharacters, characterInitial, renderCharacter, stateFields, valueType, stateDifference, CONDITION_OPS,
     ensureCharacterIDs, nextCharacterID, characterTag, characterTokenCount, DEFAULT_CHARACTER_STATE, defaultCharacterState, saveDefaultCharacterState, validateCharacterQueryCleanup } from './characters-core.js';
 import { DEFAULT_STATE_API, DEFAULT_STATE_PROMPTS, validateStateAPI, requestStateUpdate } from './character-api.js';
 import { CharacterEngine } from './characters-engine.js';
 import { requestModels } from './embeddings.js';
 import { worldEnabled, WORLD_EVENT } from './world-state.js';
-import { cgMacro, validateCGSource, readCGFile, mountCGRenderer, validateCGFloors, DEFAULT_CG_FLOORS } from './character-cg.js';
+import { cgMacro, validateCGSource, readCGFile, mountCGRenderer, validateCGFloors, DEFAULT_CG_FLOORS, MAX_CG_IMAGES } from './character-cg.js';
 
 const el = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
 const id = () => globalThis.crypto?.randomUUID?.() ?? 'c-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
@@ -44,7 +44,6 @@ export function mountCharacters(root, { getContext }) {
     const engine = new CharacterEngine({ getContext, getKey:key, onChange:error => {
         if (error) say(error,'error');
         renderDebug();
-        if (view === 'relations') renderRelations();
         if (view === 'detail' && !engine?.job && document.activeElement !== find('current-state')) refreshState(false);
     } });
     async function action(fn) {
@@ -63,7 +62,6 @@ export function mountCharacters(root, { getContext }) {
             else tab.removeAttribute('aria-current');
         }
         if (name === 'list') renderList();
-        if (name === 'relations') renderRelations();
         if (name === 'debug') renderDebug();
         root.querySelector('.wo-window-body').scrollTop = 0;
     }
@@ -83,7 +81,12 @@ export function mountCharacters(root, { getContext }) {
             const row = button('',() => openCharacter(character.id)); row.className = 'wo-ch-contact';
             const picture = el('span','wo-ch-avatar'); avatar(picture,character);
             const words = el('span','wo-ch-contact-text'); words.append(el('strong','',character.name),el('small','','ID ' + character.cgId + ' · ' + (character.keywords.join(',') || '未设置关键词')));
-            row.append(picture,words,el('span','wo-ch-chevron','›')); list.append(row);
+            const participates = character.enabled !== false && character.keywords.some(keyword => keyword.trim());
+            const indicator = el('span','wo-ch-match-status ' + (participates ? 'is-enabled' : 'is-disabled'));
+            const label = participates ? '参与关键词匹配' : character.enabled === false ? '不参与关键词匹配：已关闭' : '不参与关键词匹配：未设置关键词';
+            indicator.setAttribute('role','img'); indicator.setAttribute('aria-label',label); indicator.title = label;
+            const icon = el('i','fa-solid ' + (participates ? 'fa-circle-check' : 'fa-circle-xmark')); icon.setAttribute('aria-hidden','true'); indicator.append(icon);
+            row.append(picture,words,indicator,el('span','wo-ch-chevron','›')); list.append(row);
         }
         if (!filtered.length) list.append(el('p','wo-ch-empty',characters.length ? '没有找到匹配的角色。' : '还没有角色。点击“新建角色”，为这个世界添加一位人物。'));
     }
@@ -122,45 +125,71 @@ export function mountCharacters(root, { getContext }) {
         }
         row.append(actions,button('移除此权限配置',() => row.remove())); find('policies').append(row);
     }
-    function addCG(value = { name:'',src:'' }) {
+    function addCG(value = { name:'',images:[] }) {
         const row = el('div','wo-ch-cg-card'); row.dataset.cgRow = '';
-        const picture = el('div','wo-ch-cg-picture'), controls = el('div','wo-ch-cg-controls');
-        const name = field(controls,'CG 名称',value.name); name.dataset.cgName = ''; name.maxLength = 100;
-        const source = field(controls,'图片地址（或从手机上传）',value.src.startsWith('data:') ? '' : value.src);
-        source.dataset.cgSrc = ''; let embedded = value.src.startsWith('data:') ? value.src : '';
-        const sourceValue = () => embedded || source.value.trim();
-        // Keep embedded image data out of the text field so mobile editing stays responsive.
-        Object.defineProperty(row,'cgValue',{ get:() => ({ name:name.value.trim(),src:sourceValue() }) });
-        const file = field(controls,'选择图片'); file.type = 'file'; file.accept = 'image/png,image/jpeg,image/webp,image/gif'; file.dataset.cgFile = '';
-        const macro = el('code','wo-ch-cg-macro');
+        const controls = el('div','wo-ch-cg-controls'), gallery = el('div','wo-ch-cg-gallery');
+        const name = field(controls,'CG 包名',value.name); name.dataset.cgName = ''; name.maxLength = 100;
+        const images = [...(value.images ?? (value.src ? [value.src] : []))];
+        let aliases = (value.aliases ?? []).map(alias => ({ ...alias }));
+        // Keep embedded image bytes out of editable fields and the model's macro list.
+        Object.defineProperty(row,'cgValue',{ get:() => ({ name:name.value.trim(),images:[...images],
+            ...(aliases.length ? { aliases:aliases.map(alias => ({ ...alias })) } : {}) }) });
+        const file = field(controls,'批量添加图片'); file.type = 'file'; file.multiple = true;
+        file.accept = 'image/png,image/jpeg,image/webp,image/gif'; file.dataset.cgFile = '';
+        const source = field(controls,'添加图片地址（每行一个）','',true); source.rows = 2; source.dataset.cgSrc = ''; source.placeholder = 'https://…';
+        const macro = el('code','wo-ch-cg-macro'), count = el('span','fm-hint'); count.dataset.cgCount = '';
+        const showMacro = () => { macro.textContent = cgMacro({ cgId:Number(find('id').value) },{ name:name.value.trim() || '包名' }); };
         const show = () => {
-            macro.textContent = cgMacro({ cgId:Number(find('id').value) },{ name:name.value.trim() || '图片名' });
-            picture.replaceChildren();
-            if (!sourceValue()) { picture.append(el('i','fa-solid fa-image')); return; }
-            try { validateCGSource(sourceValue()); } catch { picture.append(el('span','','图片地址无效')); return; }
-            const img = el('img'); img.src = sourceValue(); img.alt = name.value || 'CG 预览'; img.loading = 'lazy'; img.referrerPolicy = 'no-referrer';
-            img.addEventListener('error',() => picture.replaceChildren(el('span','','图片加载失败')),{once:true}); picture.append(img);
+            showMacro(); count.textContent = images.length + ' 张图片 · 每楼随机显示一张'; gallery.replaceChildren();
+            if (!images.length) gallery.append(el('p','fm-hint','此包尚无图片，请批量选择文件或添加图片地址。'));
+            images.forEach((src,index) => {
+                const tile = el('div','wo-ch-cg-tile'), picture = el('div','wo-ch-cg-picture'), img = el('img');
+                img.src = src; img.alt = (name.value || '图片包') + ' · 图片 ' + (index + 1); img.loading = 'lazy'; img.referrerPolicy = 'no-referrer';
+                img.addEventListener('error',() => picture.replaceChildren(el('span','','图片加载失败')),{once:true}); picture.append(img);
+                const remove = button('移除图片 ' + (index + 1),() => {
+                    images.splice(index,1);
+                    aliases = aliases.filter(alias => alias.index !== index).map(alias => ({ ...alias,index:alias.index > index ? alias.index - 1 : alias.index }));
+                    show();
+                }); remove.dataset.cgRemove = '';
+                tile.append(picture,remove); gallery.append(tile);
+            });
         };
-        name.addEventListener('input',() => { macro.textContent = cgMacro({ cgId:Number(find('id').value) },{ name:name.value.trim() || '图片名' }); });
-        source.addEventListener('input',() => { embedded = ''; source.placeholder = 'https://…'; });
-        source.addEventListener('change',show);
+        const checkCount = length => {
+            const total = [...find('cgs').children].reduce((sum,item) => sum + item.cgValue.images.length,0);
+            if (total + length > MAX_CG_IMAGES) throw new Error('每个角色的 CG 图片合计不能超过 200 张。');
+        };
+        const appendImages = sources => { checkCount(sources.length); images.push(...sources.map(validateCGSource)); show(); };
+        name.addEventListener('input',showMacro);
         file.addEventListener('change',() => void action(async () => {
-            const selectedFile = file.files[0], version = detailVersion, capturedOwner = definitionOwner;
-            if (!selectedFile) return;
-            const src = await readCGFile(selectedFile);
-            if (!row.isConnected || version !== detailVersion || capturedOwner !== calendarOwner(getContext())) throw new DOMException('角色已变化','AbortError');
-            embedded = src; source.value = ''; source.placeholder = '已上传本地图片';
-            if (!name.value.trim()) name.value = selectedFile.name.replace(/\.[^.]+$/,'');
-            show(); say('CG 图片已载入，保存角色设定后生效。');
+            const files = [...file.files], version = detailVersion, capturedOwner = definitionOwner;
+            if (!files.length) return;
+            file.disabled = true;
+            const ensureCurrent = () => {
+                if (!row.isConnected || version !== detailVersion || capturedOwner !== calendarOwner(getContext())) throw new DOMException('角色已变化','AbortError');
+            };
+            try {
+                checkCount(files.length); const sources = [];
+                // Read/compress sequentially to avoid large simultaneous allocations on Android.
+                for (const [index,selectedFile] of files.entries()) {
+                    ensureCurrent(); say('正在读取图片 ' + (index + 1) + ' / ' + files.length + '…');
+                    sources.push(await readCGFile(selectedFile)); ensureCurrent();
+                }
+                appendImages(sources);
+                if (!name.value.trim()) name.value = files[0].name.replace(/\.[^.]+$/,'').trim();
+                showMacro(); say('已向图片包添加 ' + sources.length + ' 张图片，保存角色设定后生效。');
+            } finally { file.value = ''; file.disabled = false; }
         }));
-        if (embedded) source.placeholder = '已上传本地图片';
         const actions = el('div','fm-actions');
-        actions.append(button('复制图片宏',() => void action(async () => {
+        actions.append(button('添加图片地址',() => void action(() => {
+            const sources = source.value.split(/\r?\n/).map(text => text.trim()).filter(Boolean);
+            if (!sources.length) throw new Error('请先填写图片地址。');
+            appendImages(sources); source.value = ''; say('图片地址已加入此包，保存角色设定后生效。');
+        })),button('复制图片包宏',() => void action(async () => {
             const text = macro.textContent;
             if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
-            say('图片宏：' + text);
-        })),button('移除 CG',() => row.remove()));
-        controls.append(macro,actions); row.append(picture,controls); find('cgs').append(row); show();
+            say('图片包宏：' + text);
+        })),button('移除图片包',() => row.remove()));
+        controls.append(macro,actions,count); row.append(controls,gallery); find('cgs').append(row); show();
     }
     function readDefinition() {
         const existing = directoryOf(getContext()).find(item => item.id === selected);
@@ -246,43 +275,6 @@ export function mountCharacters(root, { getContext }) {
         try { await ctx.saveMetadata(); }
         catch (error) { if (ctx.chatMetadata[CHARACTERS_KEY] === next) ctx.chatMetadata[CHARACTERS_KEY] = old; throw error; }
         if (ctx.chatMetadata === getContext().chatMetadata) refreshState(true);
-    }
-    function renderRelations() {
-        const characters = sortedCharacters(directoryOf(getContext())), states = Object.fromEntries(characters.map(item => [item.id,currentState(getContext(),item)]));
-        const edges = relationshipsOf(characters,states), graph = find('graph'), list = find('relations');
-        graph.replaceChildren(); list.replaceChildren();
-        if (!characters.length) { graph.append(el('p','wo-ch-empty','添加角色及 relationship 状态后，这里会显示有向关系图。')); return; }
-        const nodes = characters.map(item => ({ id:item.id,name:item.name }));
-        for (const edge of edges) if (!edge.target && !nodes.some(item => item.id === 'external:' + edge.name)) nodes.push({ id:'external:' + edge.name,name:edge.name,external:true });
-        const size = Math.max(320,graph.clientWidth || 520,nodes.length * 50), radius = size / 2 - 75;
-        const positions = new Map(nodes.map((node,index) => {
-            const angle = 2 * Math.PI * index / nodes.length - Math.PI / 2;
-            return [node.id,{ x:size / 2 + radius * Math.cos(angle),y:size / 2 + radius * Math.sin(angle) }];
-        }));
-        const svgEl = (tag,attrs = {}) => { const node = document.createElementNS('http://www.w3.org/2000/svg',tag); for (const [key,value] of Object.entries(attrs)) node.setAttribute(key,String(value)); return node; };
-        const svg = svgEl('svg',{ viewBox:'0 0 ' + size + ' ' + size,role:'img','aria-label':'角色有向关系图',width:size,height:size });
-        const defs = svgEl('defs'), marker = svgEl('marker',{ id:'wo-ch-arrow',viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:7,markerHeight:7,orient:'auto-start-reverse' });
-        marker.append(svgEl('path',{ d:'M 0 0 L 10 5 L 0 10 z',fill:'currentColor' })); defs.append(marker); svg.append(defs);
-        for (const edge of edges) {
-            const start = positions.get(edge.source), end = positions.get(edge.target ?? 'external:' + edge.name);
-            const dx = end.x - start.x, dy = end.y - start.y, length = Math.hypot(dx,dy) || 1;
-            const self = edge.source === edge.target;
-            const d = self ? 'M ' + (start.x-20) + ' ' + (start.y-20) + ' c -65 -80 105 -80 45 0'
-                : 'M ' + (start.x + dx*30/length) + ' ' + (start.y + dy*30/length) + ' Q ' + ((start.x+end.x)/2-dy*.08) + ' ' + ((start.y+end.y)/2+dx*.08) + ' ' + (end.x-dx*32/length) + ' ' + (end.y-dy*32/length);
-            const path = svgEl('path',{ d,fill:'none',stroke:'currentColor','stroke-width':1.5,'marker-end':'url(#wo-ch-arrow)',opacity:.65 });
-            const title = svgEl('title'); title.textContent = edge.description; path.append(title); svg.append(path);
-            const row = el('div','wo-ch-relation-row'); row.append(el('strong','',characters.find(item => item.id === edge.source)?.name + ' → ' + edge.name),el('p','',edge.description)); list.append(row);
-        }
-        for (const node of nodes) {
-            const point = positions.get(node.id), group = svgEl('g',{ transform:'translate(' + point.x + ' ' + point.y + ')',tabindex:node.external ? -1 : 0,role:'button','aria-label':'查看 ' + node.name });
-            group.append(svgEl('circle',{ r:28,class:node.external ? 'wo-ch-node-external' : 'wo-ch-node' }));
-            const text = svgEl('text',{ y:48,'text-anchor':'middle',fill:'currentColor' }); text.textContent = node.name; group.append(text);
-            const icon = svgEl('text',{ y:6,'text-anchor':'middle',fill:'currentColor' }); icon.textContent = node.name[0]; group.append(icon);
-            const open = () => { if (!node.external) openCharacter(node.id); }; group.addEventListener('click',open);
-            group.addEventListener('keydown',event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } }); svg.append(group);
-        }
-        graph.append(svg);
-        if (!edges.length) list.append(el('p','fm-hint','还没有关系。可在角色状态中加入 relationship，例如 [{"苏岚":"朋友"}]。'));
     }
     function fillQueryCleanup() {
         const rule = validateCharacterQueryCleanup(getContext().extensionSettings?.[CHARACTERS_KEY]?.queryCleanup);
@@ -477,7 +469,7 @@ export function mountCharacters(root, { getContext }) {
         const currentOwner = calendarOwner(getContext());
         if (owner !== currentOwner) { owner = currentOwner; selected = ''; setView('list'); }
         renderList(); if (view === 'detail') refreshState(true);
-        if (view === 'relations') renderRelations(); if (view === 'debug') renderDebug();
+        if (view === 'debug') renderDebug();
     }
     root.addEventListener('world-os:page',event => { if (event.detail.name === 'characters') refresh(); });
     const ctx = getContext();

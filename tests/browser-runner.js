@@ -279,7 +279,7 @@ try {
             await tap('#wo-cal-jump-close');
             if (await evaluate("document.querySelector('#wo-calendar-jump').open")) throw new Error('time dialog failed to close');
         });
-        if (tauri) await uiCheck('Android 触摸角色、关系、接口、调试与快照入口，底部菜单保持可达', async () => {
+        if (tauri) await uiCheck('Android 触摸角色、接口、调试与快照入口，底部三个菜单保持可达', async () => {
             const tap = async selector => {
                 const point = await evaluate("(() => { const node=document.querySelector(" + JSON.stringify(selector) + "); node.scrollIntoView({block:'center'}); const r=node.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()");
                 await send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...point,id:1,radiusX:1,radiusY:1,force:1}]});
@@ -289,8 +289,8 @@ try {
             await tap('#wo-ch-list .wo-ch-contact');
             if (!await evaluate("!document.querySelector('[data-ch-view=\"detail\"]').hidden")) throw new Error('contact touch did not open details');
             await tap('#wo-ch-cg-section > summary');
-            if (!await evaluate("document.querySelector('#wo-ch-cg-section').open && document.querySelectorAll('#wo-ch-cgs img').length === 2")) throw new Error('CG touch did not open saved gallery: '+JSON.stringify(await evaluate("({open:document.querySelector('#wo-ch-cg-section').open,images:document.querySelectorAll('#wo-ch-cgs img').length,id:document.querySelector('#wo-ch-id').value})")));
-            for (const name of ['relations','api','debug','list']) {
+            if (!await evaluate("document.querySelector('#wo-ch-cg-section').open && document.querySelectorAll('#wo-ch-cgs img').length === 3")) throw new Error('CG touch did not open saved gallery: '+JSON.stringify(await evaluate("({open:document.querySelector('#wo-ch-cg-section').open,images:document.querySelectorAll('#wo-ch-cgs img').length,id:document.querySelector('#wo-ch-id').value})")));
+            for (const name of ['api','debug','list']) {
                 await tap('[data-ch-tab="' + name + '"]');
                 if (!await evaluate("!document.querySelector('[data-ch-view=\"" + name + "\"]').hidden")) throw new Error('tab touch did not switch to '+name);
             }
@@ -330,13 +330,12 @@ try {
     await send('Runtime.evaluate', { expression: "if (!document.querySelector('#world-os').open) document.querySelector('#wo-launcher').click(); document.querySelector('#wo-back').click(); document.querySelector('.wo-window-body').scrollTop = 0; document.fonts.ready", awaitPromise:true, returnByValue:true });
     await send('Page.bringToFront');
     try {
-        for (const view of ['home', 'memory', 'calendar', 'calendar-time', 'characters', 'character-detail', 'relationships', 'character-api', 'character-debug', 'snapshot', 'character-defaults', 'character-cg', 'laboratory', 'laboratory-app', 'cg-chat']) {
+        for (const view of ['home', 'memory', 'calendar', 'calendar-time', 'characters', 'character-detail', 'character-api', 'character-debug', 'snapshot', 'character-defaults', 'character-cg', 'laboratory', 'laboratory-app', 'cg-chat']) {
             if (view === 'memory') await send('Runtime.evaluate', { expression: "document.querySelector('#wo-open-floor-memory').click(); for (const section of document.querySelectorAll('#floor-memory details')) section.open = false; document.querySelector('.wo-window-body').scrollTop = 0;", returnByValue:true });
             if (view === 'calendar') await send('Runtime.evaluate', { expression: "document.querySelector('#wo-open-calendar').click(); document.querySelector('.wo-window-body').scrollTop = 0;", returnByValue:true });
             if (view === 'calendar-time') await send('Runtime.evaluate', { expression: "document.querySelector('#world-os').close(); document.querySelector('#wo-calendar-quick').click();", returnByValue:true });
             if (view === 'characters') await send('Runtime.evaluate', { expression:"if(document.querySelector('#wo-calendar-jump').open)document.querySelector('#wo-calendar-jump').close();globalThis.__showCharacterFixture();",returnByValue:true });
             if (view === 'character-detail') await send('Runtime.evaluate',{expression:"document.querySelector('#wo-ch-list .wo-ch-contact').click();document.querySelector('.wo-window-body').scrollTop=0;",returnByValue:true});
-            if (view === 'relationships') await send('Runtime.evaluate',{expression:"document.querySelector('[data-ch-tab=\"relations\"]').click();",returnByValue:true});
             if (view === 'character-api') await send('Runtime.evaluate',{expression:"document.querySelector('[data-ch-tab=\"api\"]').click();",returnByValue:true});
             if (view === 'character-debug') await send('Runtime.evaluate',{expression:"document.querySelector('[data-ch-tab=\"debug\"]').click();document.querySelector('#wo-ch-query-form').closest('details').open=true;",returnByValue:true});
             if (view === 'snapshot') await send('Runtime.evaluate',{expression:"document.querySelector('#wo-open-snapshot').click();",returnByValue:true});
