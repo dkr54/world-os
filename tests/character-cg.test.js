@@ -5,6 +5,7 @@ import { CHARACTERS_KEY,validateCharacter,validateDirectory,ensureCharacterIDs,n
 import { CG_PATTERN,validateCGs,validateCGSource,cgPrompt,cgLookup,recentCGIndices,validateCGFloors,createCGPicker,MAX_CG_IMAGES } from '../character-cg.js';
 import { CharacterEngine } from '../characters-engine.js';
 import { createSnapshot,restoreSnapshot,validateSnapshot } from '../snapshots.js';
+import { memoryAssetHost } from './asset-store-fixture.js';
 import { WORLD_KEY } from '../world-state.js';
 
 const image='data:image/png;base64,aGVsbG8=';
@@ -29,7 +30,7 @@ test('已有编号永不因排序或改名变化，已删除的最高编号也�
     assert.deepEqual(next.map(p=>p.cgId),[0,6]);
     assert.deepEqual(validateDirectory([...next].reverse()).map(p=>p.cgId),[6,0]);
 });
-test('已编号旧 CG 自动转为同名单图包，宏、聊天和状态保持原样，只保存一次',()=>{
+test('已编号旧 CG 自动转为同名单图包，宏与状态保持原样，落盘延后到图片迁移完成',()=>{
     const legacy={...make({cgId:7}),cgs:[{name:'旧图',src:image},{name:'旧图二',src:'https://example.com/old.png'}]};
     const ctx=context([legacy]);let saves=0;ctx.saveSettingsDebounced=()=>saves++;
     ctx.chat[0].mes='原文 {{7.旧图}}';ctx.chatMetadata[CHARACTERS_KEY]={states:{'old-a':{age:42,relationship:[{角色B:'伙伴'}]}}};
@@ -39,7 +40,7 @@ test('已编号旧 CG 自动转为同名单图包，宏、聊天和状态保持�
     assert.deepEqual(upgraded.cgs,[{name:'旧图',images:[image]},{name:'旧图二',images:['https://example.com/old.png']}]);
     assert.equal(upgraded.cgId,7);assert.equal(cgPrompt([upgraded]),prompt);
     assert.equal(JSON.stringify([ctx.chat,ctx.chatMetadata]),before);
-    ensureCharacterIDs(ctx);assert.equal(saves,1);
+    ensureCharacterIDs(ctx);assert.equal(saves,0);
 });
 test('图片包保存多张图片并拒绝空包、坏图片与超出原有角色总图片数限制',()=>{
     const images=[image,'https://example.com/two.webp'];
@@ -166,10 +167,11 @@ test('快照保存恢复 CG、编号计数器和 N；旧版快照自动补号，
     ensureCharacterIDs(ctx);ctx.extensionSettings[CHARACTERS_KEY].nextIds['character:cg-card.png']=9;
     ctx.extensionSettings[CHARACTERS_KEY].cgRenderCount=2;
     const snapshot=createSnapshot(ctx);
+    const {store:assetStore}=memoryAssetHost();
     ctx.extensionSettings[CHARACTERS_KEY].cards['character:cg-card.png']=[];
-    await restoreSnapshot(snapshot,ctx);
+    await restoreSnapshot(snapshot,ctx,{assetStore});
     const restored=ctx.extensionSettings[CHARACTERS_KEY];
-    assert.deepEqual(restored.cards['character:cg-card.png'][0].cgs[0].images,[image]);
+    assert.equal(await assetStore.read(restored.cards['character:cg-card.png'][0].cgs[0].images[0]),image);
     assert.equal(nextCharacterID(ctx),9);assert.equal(restored.cgRenderCount,2);
     const bad=structuredClone(snapshot);bad.settings[CHARACTERS_KEY].cgRenderCount=-1;
     assert.throws(()=>validateSnapshot(bad),/楼数/);
@@ -180,6 +182,6 @@ test('快照保存恢复 CG、编号计数器和 N；旧版快照自动补号，
     legacy.settings[CHARACTERS_KEY].cards['character:cg-card.png'][0].cgs=[{name:'旧图',src:image}];
     assert.deepEqual(validateSnapshot(legacy).settings[CHARACTERS_KEY].cards['character:cg-card.png'][0].cgs,[{name:'旧图',images:[image]}]);
     const multi=createSnapshot(context(validateDirectory([make({cgs:[{name:'多图',images:[image,'https://example.com/second.png']}]})])));
-    await restoreSnapshot(multi,ctx);
+    await restoreSnapshot(multi,ctx,{assetStore});
     assert.equal(ctx.extensionSettings[CHARACTERS_KEY].cards['character:cg-card.png'][0].cgs[0].images.length,2);
 });

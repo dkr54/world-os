@@ -2,6 +2,8 @@ import { calendarOwner, calendarChat } from './calendar-core.js';
 import { normalizeText, splitKeywords, compileRegex } from './core.js';
 import { validateCGs, isCGMacro, cgPrompt } from './character-cg.js';
 
+import { isLocalCharacterAsset, hasEmbeddedCharacterImages } from './character-assets.js';
+
 export const CHARACTERS_KEY = 'world_os_characters';
 export const cloneJSON = value => JSON.parse(JSON.stringify(value));
 const forbidden = new Set(['__proto__', 'prototype', 'constructor']);
@@ -120,7 +122,7 @@ export function validateCharacter(input) {
     const name = String(value.name ?? '').trim();
     if (!name || name.length > 100 || /[\r\n<>]/.test(name)) throw new Error('角色名需要 1～100 字且不包含换行或尖括号。');
     const avatar = String(value.avatar ?? '');
-    if (avatar && !/^data:image\/(?:png|jpeg|webp|gif);base64,[a-zA-Z0-9+/=]+$/.test(avatar)) {
+    if (avatar && !isLocalCharacterAsset(avatar) && !/^data:image\/(?:png|jpeg|webp|gif);base64,[a-zA-Z0-9+/=]+$/.test(avatar)) {
         let url;
         try { url = new URL(avatar); } catch { throw new Error('头像需要 HTTP(S) 图片地址，或上传一张图片。'); }
         if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new Error('头像地址不支持此格式。');
@@ -198,7 +200,8 @@ export function ensureCharacterIDs(ctx) {
     }
     if (changed) {
         ctx.extensionSettings[CHARACTERS_KEY] = { ...config,cards,nextIds };
-        ctx.saveSettingsDebounced();
+        // Embedded images are migrated before the next save; do not serialize the old huge payload here.
+        if (!hasEmbeddedCharacterImages(config)) ctx.saveSettingsDebounced();
     }
 }
 const EMPTY_DIRECTORY = [];

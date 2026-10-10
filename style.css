@@ -306,6 +306,7 @@
 #world-os .wo-ch-cg-card { display:grid; grid-template-columns:minmax(0,1fr); gap:12px; padding:12px; border:1px solid rgba(128,128,128,.25); border-radius:10px; }
 #world-os .wo-ch-cg-gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(100px,1fr)); gap:10px; }
 #world-os .wo-ch-cg-gallery > p { grid-column:1/-1; }
+#world-os .wo-ch-cg-pages { grid-column:1/-1; align-items:center; }
 #world-os .wo-ch-cg-tile { min-width:0; display:flex; flex-direction:column; gap:6px; }
 #world-os .wo-ch-cg-tile .menu_button { width:100%; min-height:36px; margin:0; font-size:.8em; }
 #world-os .wo-ch-cg-picture { display:flex; align-items:center; justify-content:center; height:100px; background:rgba(128,128,128,.08); border-radius:8px; overflow:hidden; font-size:1.4em; }

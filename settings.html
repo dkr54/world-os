@@ -272,6 +272,7 @@
 
     <section id="wo-characters" class="wo-characters floor-memory" data-wo-page="characters" data-wo-title="角色目录" hidden>
       <p id="wo-ch-status" class="fm-status" role="status" aria-live="polite"></p>
+      <p id="wo-ch-image-status" class="fm-hint" role="status" aria-live="polite"></p>
       <div class="wo-ch-view" data-ch-view="list">
         <div class="wo-ch-heading"><div><h3>角色</h3><p id="wo-ch-count" class="fm-hint"></p></div><div class="wo-ch-create-actions"><button type="button" id="wo-ch-add" class="menu_button"><i class="fa-solid fa-user-plus" aria-hidden="true"></i> 新建角色</button><button type="button" id="wo-ch-defaults-open" class="menu_button"><i class="fa-solid fa-sliders" aria-hidden="true"></i> 默认状态</button></div></div>
         <label class="wo-ch-search"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input id="wo-ch-search" class="text_pole" placeholder="搜索角色姓名或关键词" aria-label="搜索角色"></label>
@@ -306,6 +307,7 @@
           <details><summary>角色图片</summary><label>图片网址<input id="wo-ch-avatar" class="text_pole" placeholder="https://…"></label><label>或从手机选择图片<input id="wo-ch-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label><p class="fm-hint">上传图片会缩小后保存，快照也会包含上传头像。</p><button id="wo-ch-avatar-clear" type="button" class="menu_button">移除图片</button></details>
           <details id="wo-ch-cg-section"><summary>角色 CG 图片包</summary>
             <p class="fm-hint">每个包设置一个包名，可一次选择多张图片，也可添加 HTTP(S) 图片地址。回复中的 {{id.包名}} 会随机显示包内一张图片，同一楼同一包在本次打开聊天期间保持选图稳定。原始聊天与编辑内容始终保留宏文本。</p>
+            <p class="fm-hint">本地图片逐张保存在酒馆自己的图片目录中，角色设置只保存地址。点击“预览图片”查看，每次最多加载一个包的 6 张图片；收起预览后释放。首次升级会自动整理旧图片，请等待完成后编辑。</p>
             <div id="wo-ch-cgs" class="wo-ch-cgs"></div>
             <div class="fm-actions"><button id="wo-ch-cg-add" type="button" class="menu_button"><i class="fa-solid fa-images" aria-hidden="true"></i> 添加图片包</button><button id="wo-ch-copy-cg" type="button" class="menu_button">复制预设宏 {{CG}}</button></div>
             <p class="fm-hint">保存角色设定后生效。{{CG}} 只列出本轮命中角色的图片包宏，不列出包内文件。旧 CG 按末尾数字归包，如“休闲装1、休闲装2”合并为“休闲装”；无数字后缀则保留为同名单图包。历史图片宏继续可用。每个角色合计最多 200 张图片；大图片会缩小保存，大 GIF 请使用图片地址。图片包与上传图片均随状态快照保存。</p>

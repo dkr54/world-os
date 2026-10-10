@@ -1,5 +1,6 @@
 import { CHARACTERS_KEY } from '../characters-core.js';
-import { createSnapshot,validateSnapshot } from '../snapshots.js';
+import { createSnapshot,createPortableSnapshot,validateSnapshot } from '../snapshots.js';
+import { isLocalCharacterAsset } from '../character-assets.js';
 import { WORLD_KEY,announceWorldChange } from '../world-state.js';
 
 export async function runCGChecks({check,assert,waitFor,delay,emit,getContext,setContext,macros,mainId}) {
@@ -42,8 +43,11 @@ export async function runCGChecks({check,assert,waitFor,delay,emit,getContext,se
         assert(cg==='<0_示例角色甲>\n{{0.晨光}}\n{{0.重逢}}\n</0_示例角色甲>','CG listing mismatch');
         assert(!cg.includes('data:image')&&!cg.includes('苏岚'),'CG leaked sources or uncalled characters');
         assert(macros.get('character')().includes('{{0.晨光}}'),'state macro expansion ate image macro');
-        const snap=validateSnapshot(createSnapshot(ctx));
-        assert(JSON.stringify(snap.settings[CHARACTERS_KEY].cards[owner].find(p=>p.id===mainId).cgs)===JSON.stringify(person().cgs),'snapshot lost pack images');
+        assert(isLocalCharacterAsset(source),'CG bytes are still in settings');
+        const snap=validateSnapshot(await createPortableSnapshot(ctx));
+        const embedded=snap.settings[CHARACTERS_KEY].cards[owner].find(p=>p.id===mainId).cgs;
+        assert(embedded[0].images[0].startsWith('data:image/')&&embedded[0].images.length===2,'portable snapshot lost pack images');
+        assert(!q('wo-ch-cgs').querySelector('img'),'collapsed packs eagerly load images');
         q('wo-ch-cg-section').open=true;
         const body=q('world-os').querySelector('.wo-window-body');
         assert(body.scrollWidth<=body.clientWidth+1,'mobile CG form overflow');
@@ -89,7 +93,7 @@ export async function runCGChecks({check,assert,waitFor,delay,emit,getContext,se
         await waitFor(()=>images().length===2,'N=2 rendering');
         assert(!boxes()[0].querySelector('img')&&!boxes()[1].querySelector('img'),'old images were retained');
         assert(boxes()[0].textContent.includes('{{0.晨光}}'),'old macro disappeared');
-        assert(person().cgs[0].images.includes(images()[0].src),'selected CG not in pack');
+        assert(person().cgs[0].images.includes(images()[0].getAttribute('src')),'selected CG not in pack');
         assert(JSON.stringify(ctx.chat)===before,'renderer changed raw messages');
         assert(outside.textContent==='{{0.晨光}}'&&!outside.querySelector('img'),'CG rendered outside chat');
         assert(ctx.extensionSettings[CHARACTERS_KEY].cgRenderCount===2,'N did not persist');
@@ -101,8 +105,8 @@ export async function runCGChecks({check,assert,waitFor,delay,emit,getContext,se
         await waitFor(()=>box.querySelector('img'),'pack redraw');assert(box.querySelector('img').src===chosen,'redraw rerolled image');
         box.append(document.createTextNode(' 流式追加'));await delay(60);assert(box.querySelector('img').src===chosen,'streaming rerolled image');
         announceWorldChange();await delay(80);assert(box.querySelector('img').src===chosen,'settings refresh rerolled image');
-        const original=[...pack.images];pack.images=original.filter(src=>src!==chosen);announceWorldChange();
-        await waitFor(()=>box.querySelector('img')?.src===pack.images[0],'removed image remained selected');
+        const original=[...pack.images];pack.images=original.filter(src=>new URL(src,location.href).href!==chosen);announceWorldChange();
+        await waitFor(()=>box.querySelector('img')?.getAttribute('src')===pack.images[0],'removed image remained selected');
         pack.images=original;announceWorldChange();await delay(60);
         assert(JSON.stringify(ctx.chat)===raw,'random selection changed chat data');
     });
@@ -157,10 +161,11 @@ export async function runCGChecks({check,assert,waitFor,delay,emit,getContext,se
     await check('向已有包追加、单张移除与无效批次回滚均不丢旧图',async()=>{
         openMain();q('wo-ch-cg-section').open=true;const row=q('wo-ch-cgs').firstElementChild;
         const before=[...row.cgValue.images];await choose(row,'追加图','#666666');
+        row.querySelector('[data-cg-preview]').click();
         assert(row.cgValue.images.length===before.length+1,'append replaced old images');
         row.querySelectorAll('[data-cg-remove]')[before.length].click();assert(JSON.stringify(row.cgValue.images)===JSON.stringify(before),'remove changed other images');
         const input=row.querySelector('[data-cg-file]'), transfer=new DataTransfer();
-        const bytes=Uint8Array.from(atob(source.split(',')[1]),c=>c.charCodeAt(0));
+        const bytes=await (await fetch(source)).arrayBuffer();
         transfer.items.add(new File([bytes],'valid.png',{type:'image/png'}));
         transfer.items.add(new File(['bad'],'bad.txt',{type:'text/plain'}));
         input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));
@@ -181,16 +186,46 @@ export async function runCGChecks({check,assert,waitFor,delay,emit,getContext,se
             const migrated=legacy.extensionSettings[CHARACTERS_KEY].cards[legacyOwner][0];
             assert(migrated.cgs.length===1&&migrated.cgs[0].name==='休闲装','legacy images not grouped');
             await waitFor(()=>images().length===3,'legacy macros not rendered');
-            assert(images()[1].src===pair[0]&&images()[2].src===pair[1],'old macros lost original image');
+            assert(images()[1].getAttribute('src')===pair[0]&&images()[2].getAttribute('src')===pair[1],'old macros lost original image');
             const prompt=macros.get('CG')();assert(prompt.includes('{{0.休闲装}}')&&!prompt.includes('{{0.休闲装1}}'),'old image names leaked into CG manifest');
             q('wo-open-characters').click();document.querySelector('[data-ch-tab="list"]').click();
             q('wo-ch-list').querySelector('.wo-ch-contact').click();q('wo-ch-cg-section').open=true;
+            q('wo-ch-cgs').firstElementChild.querySelector('[data-cg-preview]').click();
             q('wo-ch-cgs').firstElementChild.querySelector('[data-cg-remove]').click();await submit();
             await waitFor(()=>images().length===2,'removed legacy image remained rendered');
             assert(boxes()[0].textContent.includes('{{0.休闲装1}}'),'deleted image macro changed meaning');
-            assert(images()[1].src===pair[1],'surviving alias index not adjusted');
+            assert(images()[1].getAttribute('src')===pair[1],'surviving alias index not adjusted');
             const pack=validateSnapshot(createSnapshot(legacy)).settings[CHARACTERS_KEY].cards[legacyOwner][0].cgs[0];
             assert(pack.aliases[0].name==='休闲装2'&&pack.aliases[0].index===0,'snapshot lost legacy mapping');
+        }finally{setContext(ctx);emit('CHAT_CHANGED');}
+    });
+    await check('45 个角色 540 张旧本地图迁移后再加图保存，配置不再携带图片内容',async()=>{
+        const bytes=new Uint8Array(await (await fetch(source)).arrayBuffer());
+        let binary='';for(const byte of bytes)binary+=String.fromCharCode(byte);
+        const largeOwner='character:many-cg.png';
+        const characters=Array.from({length:45},(_,i)=>({...person(),id:'stress-'+i,cgId:i,name:'测试角色'+i,
+            cgs:[{name:'多图包',images:Array.from({length:12},(_,j)=>'data:image/png;base64,'+btoa(binary+'test-'+i+'-'+j))}]}));
+        const sizes=[];
+        const large={...ctx,characters:[{avatar:'many-cg.png'}],chatId:'many-cg',chatMetadata:{},chat:[],
+            extensionSettings:{...ctx.extensionSettings,[CHARACTERS_KEY]:{cards:{[largeOwner]:characters}}},
+            saveSettingsDebounced:()=>sizes.push(JSON.stringify(large.extensionSettings[CHARACTERS_KEY]).length)};
+        try{
+            setContext(large);emit('CHAT_CHANGED');
+            await waitFor(()=>!q('wo-characters').inert&&!JSON.stringify(large.extensionSettings[CHARACTERS_KEY]).includes('data:image/'),'large legacy image migration',30000);
+            assert(sizes.length>0&&sizes.every(size=>size<150000),'large embedded images reached settings save');
+            q('wo-open-characters').click();document.querySelector('[data-ch-tab="list"]').click();
+            q('wo-ch-search').value='';q('wo-ch-search').dispatchEvent(new Event('input'));
+            q('wo-ch-list').querySelector('.wo-ch-contact').click();q('wo-ch-cg-section').open=true;
+            const roleId=q('wo-ch-id').value,row=q('wo-ch-cgs').firstElementChild;
+            assert(!row.querySelector('img'),'closed pack loads all images');
+            row.querySelector('[data-cg-preview]').click();assert(row.querySelectorAll('img').length===6,'preview page does not cap decoded images');
+            [...row.querySelectorAll('.wo-ch-cg-pages button')].find(button=>button.textContent==='下一页').click();
+            assert(row.querySelectorAll('img').length===6&&row.querySelector('[data-cg-remove]').textContent.includes('7'),'preview paging wrong');
+            await choose(row,'再加一张','#555555');await submit();
+            const saved=large.extensionSettings[CHARACTERS_KEY].cards[largeOwner].find(item=>String(item.cgId)===roleId);
+            assert(saved.cgs[0].images.length===13&&saved.cgs[0].images.every(isLocalCharacterAsset),'extra image save failed');
+            assert(!q('wo-ch-cgs').querySelector('img'),'saving recreated all image previews');
+            assert(sizes.every(size=>size<150000),'new image bytes leaked into settings');
         }finally{setContext(ctx);emit('CHAT_CHANGED');}
     });
     await setLimit(2);
@@ -199,6 +234,7 @@ export async function runCGChecks({check,assert,waitFor,delay,emit,getContext,se
     globalThis.__showCGFixture=()=>{
         setContext(ctx);emit('CHAT_CHANGED');if(!q('world-os').open)q('wo-launcher').click();openMain();
         q('wo-ch-cg-section').open=true;q('wo-ch-cg-section').scrollIntoView({block:'start'});
+        q('wo-ch-cgs').firstElementChild.querySelector('[data-cg-preview]').click();
     };
     globalThis.__showCGChatFixture=()=>{
         setContext(ctx);ctx.chat=[{mes:'旧日 {{0.晨光}}',is_user:true},{mes:'清晨 {{0.晨光}}'},{mes:'再次相遇 {{0.重逢}}'}];

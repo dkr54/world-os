@@ -24,9 +24,23 @@ const modelCalls = [];
 const rerankCalls = [];
 const keywordCalls = [];
 const characterCalls = [];
+const imageFiles = new Map();
 const server = createServer(async (request, response) => {
     try {
         const url = new URL(request.url, 'http://localhost');
+        if (url.pathname === '/api/images/upload') {
+            let body = ''; for await (const chunk of request) body += chunk;
+            const { image,format,ch_name,filename } = JSON.parse(body);
+            if (ch_name !== 'world-os-cg' || !/^[a-f0-9]{64}$/.test(filename)) throw new Error('Invalid image storage request');
+            const path = '/user/images/' + ch_name + '/' + filename + '.' + format;
+            imageFiles.set(path,{ bytes:Buffer.from(image,'base64'),type:'image/' + (format === 'jpg' ? 'jpeg' : format) });
+            response.writeHead(200,{'Content-Type':'application/json'}); response.end(JSON.stringify({ path:path.slice(1) })); return;
+        }
+        if (url.pathname.startsWith('/user/images/world-os-cg/')) {
+            const file = imageFiles.get(url.pathname);
+            if (!file) { response.writeHead(404); response.end(); return; }
+            response.writeHead(200,{'Content-Type':file.type,'Content-Length':file.bytes.length}); response.end(file.bytes); return;
+        }
         if (url.pathname === '/__state') {
             response.writeHead(200, { 'Content-Type':'application/json' });
             response.end(JSON.stringify({ calls, modelCalls, rerankCalls, keywordCalls, characterCalls }));
@@ -289,7 +303,9 @@ try {
             await tap('#wo-ch-list .wo-ch-contact');
             if (!await evaluate("!document.querySelector('[data-ch-view=\"detail\"]').hidden")) throw new Error('contact touch did not open details');
             await tap('#wo-ch-cg-section > summary');
-            if (!await evaluate("document.querySelector('#wo-ch-cg-section').open && document.querySelectorAll('#wo-ch-cgs img').length === 3")) throw new Error('CG touch did not open saved gallery: '+JSON.stringify(await evaluate("({open:document.querySelector('#wo-ch-cg-section').open,images:document.querySelectorAll('#wo-ch-cgs img').length,id:document.querySelector('#wo-ch-id').value})")));
+            if (!await evaluate("document.querySelector('#wo-ch-cg-section').open && document.querySelectorAll('#wo-ch-cgs img').length === 0")) throw new Error('CG panel eagerly loaded images');
+            await tap('#wo-ch-cgs [data-cg-preview]');
+            if (!await evaluate("document.querySelectorAll('#wo-ch-cgs img').length === 2")) throw new Error('CG touch did not open selected pack preview');
             for (const name of ['api','debug','list']) {
                 await tap('[data-ch-tab="' + name + '"]');
                 if (!await evaluate("!document.querySelector('[data-ch-view=\"" + name + "\"]').hidden")) throw new Error('tab touch did not switch to '+name);

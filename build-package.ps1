@@ -4,7 +4,7 @@ $version = (Get-Content -LiteralPath (Join-Path $projectRoot 'manifest.json') -R
 if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Unexpected package version.' }
 $files = @(
     'manifest.json', 'index.js', 'laboratory-core.js', 'laboratory-package.js', 'laboratory-runtime.js', 'laboratory.js', 'docs/LABORATORY.md', 'examples/notes.worldos.json', 'calendar-core.js', 'calendar.js', 'world-state.js', 'characters-core.js', 'character-cg.js', 'character-api.js', 'characters-engine.js', 'characters.js', 'snapshots.js', 'core.js', 'host-runtime.js', 'floating-window.js', 'embeddings.js',
-    'keyword-ai.js', 'keyword-json.js', 'regex-runner.js', 'regex-worker.js',
+    'character-assets.js', 'keyword-ai.js', 'keyword-json.js', 'regex-runner.js', 'regex-worker.js',
     'settings.html', 'style.css', 'README.md'
 )
 Add-Type -AssemblyName System.IO.Compression

@@ -7,6 +7,7 @@ import { CharacterEngine } from './characters-engine.js';
 import { requestModels } from './embeddings.js';
 import { worldEnabled, WORLD_EVENT } from './world-state.js';
 import { cgMacro, validateCGSource, readCGFile, mountCGRenderer, validateCGFloors, DEFAULT_CG_FLOORS, MAX_CG_IMAGES } from './character-cg.js';
+import { createCharacterAssetStore, hasEmbeddedCharacterImages, migrateCharacterImages } from './character-assets.js';
 
 const el = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
 const id = () => globalThis.crypto?.randomUUID?.() ?? 'c-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
@@ -34,6 +35,8 @@ export function mountCharacters(root, { getContext }) {
     let defaultsOwner = '';
     let pickerJob = null, testJob = null, pickerTimer, busy = false;
     let sessionKey = '', previewJob = 0, detailVersion = 0;
+    let imageJob = null, activePreview = null;
+    const assetStore = createCharacterAssetStore();
     ensureCharacterIDs(getContext());
     const cgRenderer = mountCGRenderer({ getContext,getDirectory:directoryOf,enabled:worldEnabled,changeEvent:WORLD_EVENT,
         getLimit:ctx => ctx.extensionSettings?.[CHARACTERS_KEY]?.cgRenderCount ?? DEFAULT_CG_FLOORS });
@@ -41,6 +44,27 @@ export function mountCharacters(root, { getContext }) {
     const key = config => config.rememberKey ? config.apiKey : sessionKey;
     const config = () => validateStateAPI(getContext().extensionSettings?.[CHARACTERS_KEY]?.api ?? {});
     const say = (message, level = 'info') => { find('status').textContent = message; find('status').dataset.level = level; };
+    const imageProgress = (done,total) => {
+        find('image-status').textContent = '正在将本地图片分开保存：' + done + ' / ' + total + '。请保持应用在前台，完成后再编辑角色。';
+    };
+    function ensureImages() {
+        if (imageJob) return imageJob;
+        const ctx = getContext(), original = ctx.extensionSettings[CHARACTERS_KEY];
+        if (!hasEmbeddedCharacterImages(original)) return Promise.resolve();
+        page.inert = true; activePreview?.hideCGPreview();
+        imageJob = migrateCharacterImages(original,assetStore,{ onProgress:imageProgress,check:() => {
+            if (getContext().extensionSettings !== ctx.extensionSettings || ctx.extensionSettings[CHARACTERS_KEY] !== original) throw new Error('图片整理期间设置已改变，请重新打开角色目录重试。');
+        } }).then(next => {
+            ctx.extensionSettings[CHARACTERS_KEY] = next;
+            ctx.saveSettingsDebounced();
+            find('image-status').textContent = '本地图片已分开保存；后续保存角色只写入图片地址。';
+            renderList(); cgRenderer.refresh();
+        }).catch(error => {
+            find('image-status').textContent = error.message + ' 未完成迁移的原数据已保留；重新打开角色目录可重试。';
+            throw error;
+        }).finally(() => { page.inert = false; imageJob = null; });
+        return imageJob;
+    }
     const engine = new CharacterEngine({ getContext, getKey:key, onChange:error => {
         if (error) say(error,'error');
         renderDebug();
@@ -49,11 +73,12 @@ export function mountCharacters(root, { getContext }) {
     async function action(fn) {
         if (busy) return;
         busy = true;
-        try { await fn(); }
+        try { await ensureImages(); await fn(); }
         catch (error) { say(error.name === 'AbortError' ? '操作已取消。' : error.message,'error'); }
         finally { busy = false; }
     }
     function setView(name) {
+        if (name !== 'detail') activePreview?.hideCGPreview();
         view = name;
         if (name !== 'detail') previewJob++;
         for (const panel of page.querySelectorAll('[data-ch-view]')) panel.hidden = panel.dataset.chView !== name;
@@ -139,10 +164,21 @@ export function mountCharacters(root, { getContext }) {
         const source = field(controls,'添加图片地址（每行一个）','',true); source.rows = 2; source.dataset.cgSrc = ''; source.placeholder = 'https://…';
         const macro = el('code','wo-ch-cg-macro'), count = el('span','fm-hint'); count.dataset.cgCount = '';
         const showMacro = () => { macro.textContent = cgMacro({ cgId:Number(find('id').value) },{ name:name.value.trim() || '包名' }); };
+        let previewOpen = false, previewPage = 0;
+        const previewButton = button('预览图片',() => {
+            if (previewOpen) { row.hideCGPreview(); return; }
+            activePreview?.hideCGPreview(); activePreview = row; previewOpen = true; show();
+        }); previewButton.dataset.cgPreview = '';
+        const clearGallery = () => { for (const img of gallery.querySelectorAll('img')) img.removeAttribute('src'); gallery.replaceChildren(); };
+        row.hideCGPreview = () => { previewOpen = false; clearGallery(); previewButton.textContent = '预览图片'; if (activePreview === row) activePreview = null; };
         const show = () => {
-            showMacro(); count.textContent = images.length + ' 张图片 · 每楼随机显示一张'; gallery.replaceChildren();
+            showMacro(); count.textContent = images.length + ' 张图片 · 每楼随机显示一张'; clearGallery();
+            previewButton.textContent = previewOpen ? '收起预览' : '预览图片';
             if (!images.length) gallery.append(el('p','fm-hint','此包尚无图片，请批量选择文件或添加图片地址。'));
-            images.forEach((src,index) => {
+            if (!previewOpen) return;
+            previewPage = Math.min(previewPage,Math.max(0,Math.ceil(images.length / 6)-1));
+            images.slice(previewPage*6,previewPage*6+6).forEach((src,offset) => {
+                const index = previewPage*6+offset;
                 const tile = el('div','wo-ch-cg-tile'), picture = el('div','wo-ch-cg-picture'), img = el('img');
                 img.src = src; img.alt = (name.value || '图片包') + ' · 图片 ' + (index + 1); img.loading = 'lazy'; img.referrerPolicy = 'no-referrer';
                 img.addEventListener('error',() => picture.replaceChildren(el('span','','图片加载失败')),{once:true}); picture.append(img);
@@ -153,6 +189,12 @@ export function mountCharacters(root, { getContext }) {
                 }); remove.dataset.cgRemove = '';
                 tile.append(picture,remove); gallery.append(tile);
             });
+            if (images.length > 6) {
+                const navigation = el('div','fm-actions wo-ch-cg-pages');
+                const previous = button('上一页',() => { previewPage--; show(); }), next = button('下一页',() => { previewPage++; show(); });
+                previous.disabled = previewPage === 0; next.disabled = (previewPage+1)*6 >= images.length;
+                navigation.append(previous,el('span','fm-hint',(previewPage+1) + ' / ' + Math.ceil(images.length/6)),next); gallery.append(navigation);
+            }
         };
         const checkCount = length => {
             const total = [...find('cgs').children].reduce((sum,item) => sum + item.cgValue.images.length,0);
@@ -172,7 +214,8 @@ export function mountCharacters(root, { getContext }) {
                 // Read/compress sequentially to avoid large simultaneous allocations on Android.
                 for (const [index,selectedFile] of files.entries()) {
                     ensureCurrent(); say('正在读取图片 ' + (index + 1) + ' / ' + files.length + '…');
-                    sources.push(await readCGFile(selectedFile)); ensureCurrent();
+                    const source = await readCGFile(selectedFile); ensureCurrent();
+                    sources.push(await assetStore.save(source)); ensureCurrent();
                 }
                 appendImages(sources);
                 if (!name.value.trim()) name.value = files[0].name.replace(/\.[^.]+$/,'').trim();
@@ -188,8 +231,8 @@ export function mountCharacters(root, { getContext }) {
             const text = macro.textContent;
             if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
             say('图片包宏：' + text);
-        })),button('移除图片包',() => row.remove()));
-        controls.append(macro,actions,count); row.append(controls,gallery); find('cgs').append(row); show();
+        })),button('移除图片包',() => { row.hideCGPreview(); row.remove(); }));
+        controls.append(macro,actions,count,previewButton); row.append(controls,gallery); find('cgs').append(row); show();
     }
     function readDefinition() {
         const existing = directoryOf(getContext()).find(item => item.id === selected);
@@ -211,6 +254,7 @@ export function mountCharacters(root, { getContext }) {
     function openCharacter(characterId = '') {
         if (!calendarOwner(getContext())) { say('请先打开角色卡。','warning'); return; }
         selected = characterId; detailVersion++; previewJob++;
+        activePreview?.hideCGPreview();
         ensureCharacterIDs(getContext());
         const character = directoryOf(getContext()).find(item => item.id === selected) ?? {
             name:'',sortName:'',avatar:'',keywords:[],enabled:true,description:'',
@@ -257,13 +301,22 @@ export function mountCharacters(root, { getContext }) {
             if (ticket === previewJob) find('tokens').textContent = '上下文 Token：暂不可用（请检查宿主分词器）';
         }
     }
-    function saveDirectory(characters) {
+    async function saveDirectory(characters) {
         const ctx = getContext(), currentOwner = calendarOwner(ctx);
         if (!currentOwner || currentOwner !== definitionOwner) throw new Error('角色卡已切换，请重新打开详情。');
-        const next = validateDirectory(characters,nextCharacterID(ctx)), previous = ctx.extensionSettings[CHARACTERS_KEY] ?? {};
+        const next = validateDirectory(characters,nextCharacterID(ctx)), original = ctx.extensionSettings[CHARACTERS_KEY], previous = original ?? {};
         engine.changed();
-        ctx.extensionSettings[CHARACTERS_KEY] = { ...previous, schema:1,cards:{ ...previous.cards,[currentOwner]:next },
+        const candidate = { ...previous, schema:1,cards:{ ...previous.cards,[currentOwner]:next },
             nextIds:{ ...previous.nextIds,[currentOwner]:Math.max(nextCharacterID(ctx),...next.map(item => item.cgId + 1)) } };
+        const version = detailVersion;
+        const check = () => {
+            if (ctx.extensionSettings !== getContext().extensionSettings || ctx.extensionSettings[CHARACTERS_KEY] !== original
+                || calendarOwner(getContext()) !== currentOwner || detailVersion !== version) throw new Error('保存期间角色已切换或设置已改变，请返回原角色后重试。');
+        };
+        const persisted = await migrateCharacterImages(candidate,assetStore,{ onProgress:imageProgress,check });
+        check();
+        ctx.extensionSettings[CHARACTERS_KEY] = persisted;
+        find('image-status').textContent = '';
         ctx.saveSettingsDebounced(); renderList(); cgRenderer.refresh();
     }
     async function saveCurrentState(value) {
@@ -338,9 +391,11 @@ export function mountCharacters(root, { getContext }) {
         } catch (error) { if (error.name !== 'AbortError') find('model-status').textContent = error.message; }
         finally { if (pickerJob === controller) pickerJob = null; }
     }
-    find('definition-form').addEventListener('submit',event => { event.preventDefault(); void action(() => {
+    find('definition-form').addEventListener('submit',event => { event.preventDefault(); void action(async () => {
         const next = readDefinition(), characters = directoryOf(getContext()).filter(item => item.id !== selected); characters.push(next);
-        saveDirectory(characters); selected = next.id; openCharacter(selected); say('角色设定已保存，这张角色卡的所有聊天共享。');
+        find('definition-form').inert = true;
+        try { await saveDirectory(characters); selected = next.id; openCharacter(selected); say('角色设定已保存，这张角色卡的所有聊天共享。'); }
+        finally { find('definition-form').inert = false; }
     }); });
     find('state-form').addEventListener('submit',event => { event.preventDefault(); void action(async () => {
         await saveCurrentState(parseJSON(find('current-state').value,'当前状态')); say('当前聊天状态已保存。');
@@ -350,10 +405,10 @@ export function mountCharacters(root, { getContext }) {
         if (!character || !globalThis.confirm('恢复此角色在当前聊天中的全部基础状态？')) return;
         await saveCurrentState(character.baseState); say('已恢复当前角色的基础状态。');
     }));
-    find('delete').addEventListener('click',() => void action(() => {
+    find('delete').addEventListener('click',() => void action(async () => {
         const character = directoryOf(getContext()).find(item => item.id === selected);
         if (!character || !globalThis.confirm('删除角色“' + character.name + '”的共享设定？')) return;
-        saveDirectory(directoryOf(getContext()).filter(item => item.id !== selected)); selected = ''; setView('list'); say('角色已删除。');
+        await saveDirectory(directoryOf(getContext()).filter(item => item.id !== selected)); selected = ''; setView('list'); say('角色已删除。');
     }));
     find('avatar').addEventListener('change',() => avatar(find('avatar-preview'),{ name:find('name').value,avatar:find('avatar').value }));
     find('avatar-clear').addEventListener('click',() => { find('avatar').value = ''; find('avatar-file').value = ''; avatar(find('avatar-preview')); });
@@ -391,6 +446,8 @@ export function mountCharacters(root, { getContext }) {
         say('默认状态已保存。此角色卡中新建的角色将使用该模板，已有角色和聊天状态保持原样。');
     }); });
     find('cg-add').addEventListener('click',() => addCG());
+    find('cg-section').addEventListener('toggle',() => { if (!find('cg-section').open) activePreview?.hideCGPreview(); });
+    root.addEventListener('close',() => activePreview?.hideCGPreview());
     find('cg-floors').addEventListener('change',() => void action(() => {
         const input = find('cg-floors');
         if (!input.value.trim()) throw new Error('请填写 CG 显示楼数。');
@@ -466,16 +523,18 @@ export function mountCharacters(root, { getContext }) {
     find('cancel').addEventListener('click',() => { pickerJob?.abort(); testJob?.abort(); engine.cancel(); say('已取消请求。'); });
     function refresh() {
         ensureCharacterIDs(getContext()); cgRenderer.refresh();
+        void ensureImages().catch(() => {});
         const currentOwner = calendarOwner(getContext());
         if (owner !== currentOwner) { owner = currentOwner; selected = ''; setView('list'); }
         renderList(); if (view === 'detail') refreshState(true);
         if (view === 'debug') renderDebug();
     }
-    root.addEventListener('world-os:page',event => { if (event.detail.name === 'characters') refresh(); });
+    root.addEventListener('world-os:page',event => { if (event.detail.name === 'characters') refresh(); else activePreview?.hideCGPreview(); });
     const ctx = getContext();
     for (const name of ['CHAT_CHANGED','CHAT_LOADED','CHARACTER_SELECTED']) if (ctx.eventTypes[name]) ctx.eventSource.on(ctx.eventTypes[name],refresh);
     document.addEventListener(WORLD_EVENT,event => { refresh(); if (event.detail?.kind === 'restore') { selected = ''; setView('list'); fillAPI(); fillQueryCleanup(); } });
     for (const name of ['ONLINE_STATUS_CHANGED','CHATCOMPLETION_MODEL_CHANGED','PRESET_CHANGED']) if (ctx.eventTypes[name]) ctx.eventSource.on(ctx.eventTypes[name],() => { if (view === 'detail') refreshState(false); });
     fillAPI(); fillQueryCleanup(); renderList(); engine.mount();
+    void ensureImages().catch(() => {});
     return { engine,refresh };
 }

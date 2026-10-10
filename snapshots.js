@@ -6,6 +6,10 @@ import { validateStateAPI } from './character-api.js';
 import { WORLD_KEY, announceWorldChange } from './world-state.js';
 import { downloadMemory } from './host-runtime.js';
 import { LAB_KEY, validateLabSettings, validateLabChat } from './laboratory-core.js';
+import { createCharacterAssetStore, embedCharacterImages, migrateCharacterImages, hasEmbeddedCharacterImages } from './character-assets.js';
+
+export const SNAPSHOT_MAX_BYTES = 32*1024*1024;
+const sizeError = () => new Error('当前快照超过 32 MB（包含 CG 图片）。请使用酒馆完整数据备份保存大量图片；不会导出缺少图片的不完整快照。');
 
 const SETTINGS_KEYS = [WORLD_KEY,MODULE_KEY,CALENDAR_KEY,CHARACTERS_KEY,LAB_KEY];
 const CHAT_KEYS = [MODULE_KEY,CALENDAR_KEY,CHARACTERS_KEY,LAB_KEY];
@@ -26,11 +30,30 @@ function secretContainer(settings, path, create = false) {
 export function createSnapshot(ctx, includeKeys = false) {
     const owner = calendarOwner(ctx), scope = calendarChat(ctx);
     if (!owner || !scope) throw new Error('请先打开要保存状态的聊天。');
-    const settings = Object.fromEntries(SETTINGS_KEYS.map(key => [key,cloneJSON(ctx.extensionSettings[key] ?? null)]));
+    const settings = Object.fromEntries(SETTINGS_KEYS.map(key => [key,safeJSON(ctx.extensionSettings[key] ?? null)]));
     const metadata = Object.fromEntries(CHAT_KEYS.map(key => [key,cloneJSON(ctx.chatMetadata[key] ?? null)]));
     if (!includeKeys) for (const path of SECRET_PATHS) { const container = secretContainer(settings,path); if (container) delete container[path.at(-1)]; }
     return { format:'world-os-snapshot',schema:1,createdAt:new Date().toISOString(),owner,scope,includeKeys:Boolean(includeKeys),
         settings,metadata };
+}
+export async function createPortableSnapshot(ctx, includeKeys = false, {
+    assetStore = createCharacterAssetStore(), maxBytes = SNAPSHOT_MAX_BYTES, onProgress = () => {},
+} = {}) {
+    const data = createSnapshot(ctx,includeKeys);
+    let size = 0;
+    const addBytes = count => { size += count; if (size > maxBytes) throw sizeError(); };
+    // Count bounded pieces, so an oversized legacy collection is never stringified as a whole.
+    function count(value) {
+        if (value === null || typeof value !== 'object') { addBytes(new Blob([JSON.stringify(value)]).size); return; }
+        addBytes(2);
+        for (const [key,item] of Object.entries(value)) {
+            if (!Array.isArray(value)) addBytes(new Blob([JSON.stringify(key)]).size+1);
+            addBytes(1); count(item);
+        }
+    }
+    count(data);
+    await embedCharacterImages(data.settings[CHARACTERS_KEY],assetStore,{ addBytes,onProgress });
+    return data;
 }
 export function validateSnapshot(input) {
     const data = safeJSON(input);
@@ -99,7 +122,8 @@ export function validateSnapshot(input) {
     }
     return data;
 }
-export async function restoreSnapshot(input, ctx, { allowOtherChat = false, getContext = () => ctx, beforeRestore = () => {} } = {}) {
+export async function restoreSnapshot(input, ctx, { allowOtherChat = false, getContext = () => ctx, beforeRestore = () => {},
+    assetStore = createCharacterAssetStore() } = {}) {
     const data = validateSnapshot(input), scope = calendarChat(ctx);
     if (!scope || calendarOwner(ctx) !== data.owner) throw new Error('请打开快照所属的角色卡后恢复。');
     if (scope !== data.scope && !allowOtherChat) throw new Error('快照来自其他聊天，请确认“允许恢复到另一个聊天”。');
@@ -109,13 +133,20 @@ export async function restoreSnapshot(input, ctx, { allowOtherChat = false, getC
     const oldSettings = Object.fromEntries(settingsKeys.map(key => [key,ctx.extensionSettings[key]]));
     const oldMetadata = Object.fromEntries(chatKeys.map(key => [key,ctx.chatMetadata[key]]));
     const nextSettings = Object.fromEntries(settingsKeys.map(key => [key,
-        data.settings[key] === null ? undefined : cloneJSON(data.settings[key])]));
+        data.settings[key] === null ? undefined : safeJSON(data.settings[key])]));
     if (!data.includeKeys) for (const path of SECRET_PATHS) {
         const existing = secretContainer(ctx.extensionSettings,path);
         const value = existing?.[path.at(-1)];
         if (value !== undefined && value !== '') secretContainer(nextSettings,path,true)[path.at(-1)] = value;
     }
     const nextMetadata = Object.fromEntries(chatKeys.map(key => [key,data.metadata[key] === null ? undefined : cloneJSON(data.metadata[key])]));
+    if (hasEmbeddedCharacterImages(nextSettings[CHARACTERS_KEY])) {
+        nextSettings[CHARACTERS_KEY] = await migrateCharacterImages(nextSettings[CHARACTERS_KEY],assetStore);
+        if (getContext().chatMetadata !== ctx.chatMetadata || calendarChat(getContext()) !== scope
+            || getContext().extensionSettings !== ctx.extensionSettings
+            || chatKeys.some(key => ctx.chatMetadata[key] !== oldMetadata[key])
+            || settingsKeys.some(key => ctx.extensionSettings[key] !== oldSettings[key])) throw new Error('恢复图片期间聊天或设置已改变，快照尚未写入，请重试。');
+    }
     const write = (object,values) => { for (const [key,value] of Object.entries(values)) if (value === undefined) delete object[key]; else object[key] = value; };
     // Save current chat first; settings only become durable once chat persistence succeeds.
     write(ctx.chatMetadata,nextMetadata);
@@ -154,8 +185,10 @@ export function mountSnapshots(root, { getContext }) {
         finally { busy = false; find('export').disabled = false; find('restore').disabled = !imported; }
     }
     find('export').addEventListener('click',() => void action(async () => {
-        const data = createSnapshot(getContext(),find('keys').checked);
-        if (new Blob([JSON.stringify(data)]).size > 32*1024*1024) throw new Error('当前快照超过 32 MB，请缩小角色头像后导出。');
+        status('正在准备快照与图片…');
+        const data = await createPortableSnapshot(getContext(),find('keys').checked,{
+            onProgress:(done,total) => status('正在加入快照图片：' + done + ' / ' + total),
+        });
         const result = await downloadMemory(data,'world-os-snapshot-' + new Date().toISOString().replace(/[:.]/g,'-') + '.json');
         status('快照已导出。' + (result?.savedPath ? '\n保存位置：' + result.savedPath : ''));
     }));

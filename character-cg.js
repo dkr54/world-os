@@ -1,4 +1,6 @@
-/** CG assets stay in shared character settings. Only rendered chat DOM is changed. */
+import { isLocalCharacterAsset } from './character-assets.js';
+
+/** Settings keep host-local image paths. Only rendered chat DOM is changed. */
 export const CG_PATTERN = /\{\{(0|[1-9]\d*)\.([^{}\r\n<>]{1,100})\}\}/g;
 export const MAX_CG_SOURCE = 2000000;
 export const MAX_CG_IMAGES = 200;
@@ -22,6 +24,7 @@ export function isCGMacro(text) {
 }
 export function validateCGSource(value) {
     if (typeof value !== 'string' || !value || value.length > MAX_CG_SOURCE) throw new Error('CG 图片地址为空或图片过大。');
+    if (isLocalCharacterAsset(value)) return value;
     if (/^data:image\/(?:png|jpeg|webp|gif);base64,[a-zA-Z0-9+/=]+$/.test(value)) return value;
     let url;
     try { url = new URL(value); } catch { throw new Error('CG 需要 HTTP(S) 图片地址或从手机上传的图片。'); }
@@ -133,16 +136,19 @@ export async function readCGFile(file) {
     // Preserve small originals, including animated GIF/WebP. Large still images get a mobile-friendly copy.
     if (source.length <= MAX_CG_SOURCE) return validateCGSource(source);
     if (file.type === 'image/gif') throw new Error('GIF 需小于约 1.4 MB 以保留动画；较大的动图可填写 HTTP(S) 图片地址。');
-    const image = new Image(); image.src = source; await image.decode();
-    let edge = 2048;
-    for (let attempt = 0; attempt < 4; attempt++, edge = Math.round(edge * .75)) {
-        const ratio = Math.min(1,edge / Math.max(image.width,image.height)), canvas = document.createElement('canvas');
-        canvas.width = Math.max(1,Math.round(image.width*ratio)); canvas.height = Math.max(1,Math.round(image.height*ratio));
-        canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);
-        const result = canvas.toDataURL('image/webp',.86 - attempt*.08);
-        if (result.length <= MAX_CG_SOURCE) return validateCGSource(result);
-    }
-    throw new Error('CG 图片仍然过大，请选择较小的图片或填写图片地址。');
+    const image = new Image(), canvas = document.createElement('canvas'), url = URL.createObjectURL(file);
+    try {
+        image.src = url; await image.decode();
+        let edge = 2048;
+        for (let attempt = 0; attempt < 4; attempt++, edge = Math.round(edge * .75)) {
+            const ratio = Math.min(1,edge / Math.max(image.width,image.height));
+            canvas.width = Math.max(1,Math.round(image.width*ratio)); canvas.height = Math.max(1,Math.round(image.height*ratio));
+            canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);
+            const result = canvas.toDataURL('image/webp',.86 - attempt*.08);
+            if (result.length <= MAX_CG_SOURCE) return validateCGSource(result);
+        }
+        throw new Error('CG 图片仍然过大，请选择较小的图片或填写图片地址。');
+    } finally { image.removeAttribute('src'); canvas.width = canvas.height = 0; URL.revokeObjectURL(url); }
 }
 
 export function mountCGRenderer({ getContext, getDirectory, getLimit = () => DEFAULT_CG_FLOORS, enabled, changeEvent }) {
