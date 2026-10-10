@@ -56,7 +56,7 @@ export async function runCGChecks({check,assert,waitFor,delay,emit,getContext,se
         ctx.getTokenCountAsync=async(text,padding)=>{tokenInput=text;assert(padding===0,'token padding wrong');return 73;};
         q('wo-ch-preview-section').open=true;q('wo-ch-tokens-refresh').click();
         await waitFor(()=>q('wo-ch-tokens').textContent.includes('73'),'token count display');
-        assert(tokenInput.includes('<示例角色甲>')&&tokenInput.includes('年龄 21')&&tokenInput.includes('信赖你'),'token text missed current state/stage');
+        assert(tokenInput.includes('<0_示例角色甲>')&&tokenInput.includes('</0_示例角色甲>')&&tokenInput.includes('年龄 21')&&tokenInput.includes('信赖你'),'token text missed current state/stage');
         assert(!tokenInput.includes('{{age}}')&&!tokenInput.includes('"relationship"'),'token text not assembled');
         let resolve;
         ctx.getTokenCountAsync=()=>new Promise(r=>{resolve=r;});q('wo-ch-tokens-refresh').click();

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CHARACTERS_KEY,validateCharacter,validateDirectory,ensureCharacterIDs,nextCharacterID,renderCharacter,
-    selectCharacters,characterTokenCount,characterPrompt } from '../characters-core.js';
+    selectCharacters,characterTag,characterTokenCount,characterPrompt } from '../characters-core.js';
 import { CG_PATTERN,validateCGs,validateCGSource,cgPrompt,cgLookup,recentCGIndices,validateCGFloors,createCGPicker,MAX_CG_IMAGES } from '../character-cg.js';
 import { CharacterEngine } from '../characters-engine.js';
 import { createSnapshot,restoreSnapshot,validateSnapshot } from '../snapshots.js';
@@ -130,12 +130,12 @@ test('图片宏扫描要求完整合法括号和非负整数，未完成的流�
 test('Token 计数使用已选阶段、状态宏和角色标签，宿主分词器显式传入零 padding',async()=>{
     const ctx=context();let measured;
     ctx.getTokenCountAsync=async(text,padding)=>{measured=text;assert.equal(padding,0);return 83;};
-    const character=make({description:'{{age}} {{user}} {{char}} {{0.B}}',stages:[
+    const character=make({cgId:0,description:'{{age}} {{user}} {{char}} {{0.B}}',stages:[
         {id:'one',name:'成年',content:'已成年',conditions:[{path:'age',op:'>=',value:18}]},
         {id:'two',name:'年长',content:'不应发送',conditions:[{path:'age',op:'>=',value:80}]}]});
-    const item=renderCharacter(character,character.baseState);
+    const item={...renderCharacter(character,character.baseState),tag:characterTag(character)};
     assert.equal(await characterTokenCount(ctx,item),83);
-    assert.equal(measured,'<角色A>\n20 用户 主角 {{0.B}}\n\n已成年\n</角色A>');
+    assert.equal(measured,'<0_角色A>\n20 用户 主角 {{0.B}}\n\n已成年\n</0_角色A>');
     assert(!measured.includes('不应发送'));assert(!measured.includes('"age"'));
 });
 test('空设定计数为零且无需调用分词器；接口错误不能伪造 0 Token',async()=>{

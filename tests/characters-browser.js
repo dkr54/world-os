@@ -62,7 +62,7 @@ export async function runCharacterChecks({ check, assert, waitFor, delay, emit, 
     await check('角色宏使用原始最新两条消息，阶段和状态按当前聊天组装',async()=>{
         assert(macros.has('character'),'character macro not registered');
         ctx.chat=[{mes:'旧消息提到苏岚',is_user:true},{mes:'模型说起示例角色甲',is_user:false},{mes:'我向她挥手',is_user:true}];
-        const text=macros.get('character')();assert(text.includes('<示例角色甲>')&&!text.includes('<苏岚>'),'query range not last two messages');
+        const text=macros.get('character')();assert(text.includes('<0_示例角色甲>')&&text.includes('</0_示例角色甲>')&&!text.includes('<1_苏岚>'),'query range not last two messages');
         assert(text.includes('年龄 20')&&text.includes('初识')&&!text.includes('信赖你'),'state/stage expansion wrong');
         const another={...ctx,chatId:'second-chat',chatMetadata:{}};setContext(another);emit('CHAT_CHANGED');
         assert(characters().length===2,'definitions not shared');
@@ -208,7 +208,7 @@ export async function runCharacterChecks({ check, assert, waitFor, delay, emit, 
         const rawAI='<thinking>苏岚正在别处</thinking><ui>苏岚的状态面板</ui>示例角色甲向你挥手。';
         ctx.chat=[{mes:'旧消息 第二位',is_user:true},{mes:rawAI,is_user:false},{mes:'我走过去。',is_user:true}];
         emit('CHAT_CHANGED');tab('debug');
-        assert(macros.get('character')().includes('<苏岚>'),'blank rule changed existing raw matching');
+        assert(macros.get('character')().includes('<1_苏岚>'),'blank rule changed existing raw matching');
         const before=JSON.stringify(ctx.chat),memory=JSON.stringify(ctx.extensionSettings.floor_memory);
         q('wo-ch-query-pattern').closest('details').open=true;
         q('wo-ch-query-pattern').value=String.raw`<(thinking|ui)\b[^>]*>[\s\S]*?<\/\1>`;
@@ -221,7 +221,7 @@ export async function runCharacterChecks({ check, assert, waitFor, delay, emit, 
         emit('GENERATION_STARTED','normal',{},false);
         await globalThis.floorMemoryInterceptor(ctx.chat.map((message,index)=>({...message,index})),32000,()=>{throw Error('cleanup aborted generation');},'normal');
         const content=macros.get('character')(),cg=macros.get('CG')();
-        assert(content.includes('<示例角色甲>')&&!content.includes('<苏岚>'),'hidden text still matched role');
+        assert(content.includes('<0_示例角色甲>')&&!content.includes('<1_苏岚>'),'hidden text still matched role');
         assert(cg.includes('{{0.晨光}}')&&!cg.includes('{{2.晨光}}'),'CG did not share cleaned selection');
         emit('CHAT_COMPLETION_PROMPT_READY',{chat:[{role:'system',content:content+'\n'+cg}],dryRun:false});
         assert(q('wo-ch-debug').textContent.includes('本次实际匹配查询文本：\n示例角色甲向你挥手。\n\n我走过去打招呼。'),'debug missing actual cleaned query');
@@ -241,7 +241,7 @@ export async function runCharacterChecks({ check, assert, waitFor, delay, emit, 
         q('wo-ch-query-preview').textContent='';q('wo-ch-query-test').click();
         await waitFor(()=>q('wo-ch-query-preview').textContent==='示例角色甲向你挥手。\n\n我走过去。','preview saved rule');
         q('wo-ch-query-pattern').value='';await submit('wo-ch-query-form');
-        assert(macros.get('character')().includes('<苏岚>'),'clearing regex did not restore original behavior');
+        assert(macros.get('character')().includes('<1_苏岚>'),'clearing regex did not restore original behavior');
         q('wo-ch-query-test').click();await waitFor(()=>q('wo-ch-query-preview').textContent.includes('<thinking>'),'disabled cleanup preview');
         q('wo-ch-query-pattern').closest('details').open=false;
     });

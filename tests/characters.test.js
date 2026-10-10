@@ -316,7 +316,7 @@ test('先清洗最近两条消息再匹配角色，character 和 CG 同源，原
     let calls=0;const engine=new CharacterEngine({getContext:()=>ctx,regex:{run:(...args)=>{calls++;return queryRegex.run(...args);}}});
     engine.start();await engine.prepare();
     assert.equal(engine.run.selection.query,'示例角色甲在眼前。\n\n继续');assert.deepEqual(engine.run.selection.items.map(p=>p.id),['a']);
-    assert(engine.macro().includes('<示例角色甲>'));assert(!engine.macro().includes('<苏岚>'));
+    assert(engine.macro().includes('<0_示例角色甲>'));assert(engine.macro().includes('</0_示例角色甲>'));assert(!engine.macro().includes('<1_苏岚>'));
     assert.equal(engine.macro('CG'),'<0_示例角色甲>\n{{0.晨光}}\n</0_示例角色甲>');
     assert.equal(JSON.stringify(ctx.chat),before);assert.equal(JSON.stringify(ctx.extensionSettings[MODULE_KEY]),memory);
     engine.confirmPrompt({chat:[{role:'system',content:engine.macro()}]});assert.deepEqual(engine.run.called,['a']);

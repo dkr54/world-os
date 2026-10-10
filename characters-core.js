@@ -206,8 +206,8 @@ export function ensureCharacterIDs(ctx) {
 }
 const EMPTY_DIRECTORY = [];
 export function directoryOf(ctx) { return ctx.extensionSettings?.[CHARACTERS_KEY]?.cards?.[calendarOwner(ctx)] ?? EMPTY_DIRECTORY; }
-export function characterTag(character, directory = []) {
-    return directory.filter(item => item.name === character.name).length > 1 ? character.cgId + '_' + character.name : character.name;
+export function characterTag(character) {
+    return character.cgId + '_' + character.name;
 }
 export function characterPrompt(item) {
     const tag = item.tag ?? item.name;
