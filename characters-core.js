@@ -157,7 +157,7 @@ export function validateCharacter(input) {
     }
     return { id:value.id, cgId:value.cgId ?? null, cgs, name, sortName:String(value.sortName ?? '').trim(), avatar,
         keywords:splitKeywords(String(value.keywords ?? '')), description:String(value.description ?? ''),
-        baseState, policies:cloneJSON(policies), stages:cloneJSON(stages), enabled:value.enabled !== false };
+        baseState, policies:cloneJSON(policies), stages:cloneJSON(stages), enabled:value.enabled !== false, alwaysEnabled:value.alwaysEnabled === true };
 }
 export function validateDirectory(value, firstId = 0) {
     if (!Array.isArray(value) || value.length > 1000) throw new Error('角色目录最多支持 1000 个角色。');
@@ -245,8 +245,8 @@ export function validateCharacterQueryCleanup(value = {}) {
 export function selectCharacters(ctx, chat = ctx.chat, query = recentCharacterQuery(chat)) {
     const normalized = normalizeText(query);
     const directory = directoryOf(ctx);
-    const items = directory.filter(character => character.enabled !== false && character.keywords?.some(keyword =>
-        keyword.trim() && normalized.includes(normalizeText(keyword)))).map(character => ({ ...renderCharacter(character, currentState(ctx, character)),tag:characterTag(character,directory) }));
+    const items = directory.filter(character => character.alwaysEnabled === true || (character.enabled !== false && character.keywords?.some(keyword =>
+        keyword.trim() && normalized.includes(normalizeText(keyword))))).map(character => ({ ...renderCharacter(character, currentState(ctx, character)),tag:characterTag(character,directory) }));
     return { scope:calendarChat(ctx), query, items,
         content:items.map(characterPrompt).filter(Boolean).join('\n\n'), cgContent:cgPrompt(items) };
 }

@@ -107,10 +107,10 @@ export function mountCharacters(root, { getContext }) {
             const picture = el('span','wo-ch-avatar'); avatar(picture,character);
             const words = el('span','wo-ch-contact-text'); words.append(el('strong','',character.name),el('small','','ID ' + character.cgId + ' · ' + (character.keywords.join(',') || '未设置关键词')));
             const participates = character.enabled !== false && character.keywords.some(keyword => keyword.trim());
-            const indicator = el('span','wo-ch-match-status ' + (participates ? 'is-enabled' : 'is-disabled'));
-            const label = participates ? '参与关键词匹配' : character.enabled === false ? '不参与关键词匹配：已关闭' : '不参与关键词匹配：未设置关键词';
+            const indicator = el('span','wo-ch-match-status ' + (character.alwaysEnabled ? 'is-always' : participates ? 'is-enabled' : 'is-disabled'));
+            const label = character.alwaysEnabled ? '永久启用：始终加入角色设定' : participates ? '参与关键词匹配' : character.enabled === false ? '不参与关键词匹配：已关闭' : '不参与关键词匹配：未设置关键词';
             indicator.setAttribute('role','img'); indicator.setAttribute('aria-label',label); indicator.title = label;
-            const icon = el('i','fa-solid ' + (participates ? 'fa-circle-check' : 'fa-circle-xmark')); icon.setAttribute('aria-hidden','true'); indicator.append(icon);
+            const icon = el('i','fa-solid ' + (character.alwaysEnabled ? 'fa-thumbtack' : participates ? 'fa-circle-check' : 'fa-circle-xmark')); icon.setAttribute('aria-hidden','true'); indicator.append(icon);
             row.append(picture,words,indicator,el('span','wo-ch-chevron','›')); list.append(row);
         }
         if (!filtered.length) list.append(el('p','wo-ch-empty',characters.length ? '没有找到匹配的角色。' : '还没有角色。点击“新建角色”，为这个世界添加一位人物。'));
@@ -236,7 +236,7 @@ export function mountCharacters(root, { getContext }) {
     }
     function readDefinition() {
         const existing = directoryOf(getContext()).find(item => item.id === selected);
-        const result = { id:selected || id(),cgId:Number(find('id').value),cgs:[...find('cgs').children].map(row => row.cgValue),name:find('name').value,sortName:find('sort').value,enabled:find('enabled').checked,
+        const result = { id:selected || id(),cgId:Number(find('id').value),cgs:[...find('cgs').children].map(row => row.cgValue),name:find('name').value,sortName:find('sort').value,enabled:find('enabled').checked,alwaysEnabled:find('always').checked,
             avatar:find('avatar').value,keywords:find('keywords').value,description:find('description').value,
             baseState:parseJSON(find('base-state').value,'基础状态'), policies:[...find('policies').children].map(row => ({
                 path:row.querySelector('[data-policy-path]').value, type:row.querySelector('[data-policy-type]').value,
@@ -266,6 +266,7 @@ export function mountCharacters(root, { getContext }) {
         find('name').value = character.name; find('sort').value = character.sortName ?? '';
         find('avatar').value = character.avatar; find('avatar-file').value = '';
         find('enabled').checked = character.enabled !== false; find('keywords').value = character.keywords.join(',');
+        find('always').checked = character.alwaysEnabled === true;
         find('description').value = character.description; find('base-state').value = jsonText(character.baseState);
         find('detail-name').textContent = character.name || '新角色'; avatar(find('avatar-preview'),character);
         find('stages').replaceChildren(); character.stages.forEach(addStage);

@@ -10,6 +10,7 @@ import { mountCalendar } from './calendar.js';
 import { mountCharacters } from './characters.js';
 import { mountSnapshots } from './snapshots.js';
 import { mountLaboratory } from './laboratory.js';
+import { mountFinance } from './finance.js';
 import { WORLD_KEY, WORLD_EVENT, worldEnabled, announceWorldChange } from './world-state.js';
 import { waitForHostReady, runtimeLabel, tauriPromptSource, downloadMemory } from './host-runtime.js';
 import {
@@ -644,6 +645,7 @@ async function initialize() {
     });
     mountCalendar(root, { getContext: context, openApp: floatingWindow.openApp });
     characterApp = mountCharacters(root, { getContext: context });
+    mountFinance(root, { getContext: context });
     mountLaboratory(root, { getContext: context, shell: floatingWindow });
     mountSnapshots(root, { getContext: context });
     document.addEventListener(WORLD_EVENT, event => {

@@ -38,6 +38,14 @@ test('中文拼音与英文姓名排序，并支持多音字排序名',() => {
     assert.deepEqual(sortedCharacters([{name:'示例角色甲'},{name:'Amy'},{name:'苏岚'},{name:'Zoe'}]).map(p=>p.name),['Amy','示例角色甲','苏岚','Zoe']);
     assert.equal(sortedCharacters([{name:'重阳',sortName:'chongyang'},{name:'示例角色甲',sortName:'shilijiaosejia'}])[0].name,'重阳');
 });
+test('永久启用独立于关键词开关与空关键词，命中后不重复注入，快照保留设置',() => {
+    const permanent=person({cgId:0,enabled:false,alwaysEnabled:true,keywords:''}),ctx=context([permanent]);
+    assert.equal(selectCharacters(ctx).items.length,1);assert(selectCharacters(ctx).content.includes('<0_示例角色甲>'));
+    ctx.chat=[{mes:'无关话题'}];assert.equal(selectCharacters(ctx).items.length,1);
+    permanent.enabled=true;permanent.keywords=['角色甲'];ctx.chat=[{mes:'角色甲'}];assert.equal(selectCharacters(ctx).items.length,1);
+    const snapshot=validateSnapshot(createSnapshot(ctx));assert.equal(snapshot.settings[CHARACTERS_KEY].cards['character:card.png'][0].alwaysEnabled,true);
+    permanent.alwaysEnabled=false;permanent.keywords=[];assert.equal(selectCharacters(ctx).items.length,0);
+});
 test('所有条件满足且最后匹配的阶段胜出；未满足的设定不进入宏',() => {
     const p=person({ stages:[
         {id:'first',name:'熟悉',conditions:[{path:'affection',op:'>=',value:30}],content:'熟悉阶段'},

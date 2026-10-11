@@ -59,6 +59,16 @@ export async function runCharacterChecks({ check, assert, waitFor, delay, emit, 
         first().click();q('wo-ch-keywords').value=keywords;await submit('wo-ch-definition-form');tab('list');
         assert(first().querySelector('.wo-ch-match-status.is-enabled'),'restored matching status stale');
     });
+    await check('永久启用显示蓝色标识，无关键词且关闭关键词开关仍注入，取消后恢复原规则',async()=>{
+        const first=()=>q('wo-ch-list').querySelector('.wo-ch-contact');first().click();
+        const keywords=q('wo-ch-keywords').value;q('wo-ch-keywords').value='';q('wo-ch-enabled').checked=false;q('wo-ch-always').checked=true;
+        await submit('wo-ch-definition-form');tab('list');
+        assert(first().querySelector('.wo-ch-match-status.is-always'),'blue permanent indicator missing');
+        ctx.chat=[{mes:'完全无关的消息',is_user:true}];assert(macros.get('character')().includes('<0_示例角色甲>'),'permanent character not injected');
+        first().click();assert(q('wo-ch-always').checked,'permanent setting not persisted');q('wo-ch-always').checked=false;await submit('wo-ch-definition-form');tab('list');
+        assert(first().querySelector('.is-disabled'),'disabled indicator not restored');assert(!macros.get('character')().includes('<0_示例角色甲>'),'permanent character still injected after disable');
+        first().click();q('wo-ch-enabled').checked=true;q('wo-ch-keywords').value=keywords;await submit('wo-ch-definition-form');tab('list');
+    });
     await check('角色宏使用原始最新两条消息，阶段和状态按当前聊天组装',async()=>{
         assert(macros.has('character'),'character macro not registered');
         ctx.chat=[{mes:'旧消息提到苏岚',is_user:true},{mes:'模型说起示例角色甲',is_user:false},{mes:'我向她挥手',is_user:true}];

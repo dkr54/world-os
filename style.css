@@ -260,6 +260,7 @@
 .world-os .wo-ch-match-status { flex-shrink:0; display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; font-size:20px; }
 .world-os .wo-ch-match-status.is-enabled,.world-os .wo-ch-match-legend .is-enabled { color:#4fbd83; }
 .world-os .wo-ch-match-status.is-disabled,.world-os .wo-ch-match-legend .is-disabled { color:#e77575; }
+.world-os .wo-ch-match-status.is-always,.world-os .wo-ch-match-legend .is-always { color:#62adff; }
 .world-os .wo-ch-match-legend { display:flex; flex-wrap:wrap; gap:6px 14px; }
 .world-os .wo-ch-profile { display:flex; align-items:center; gap:18px; margin:20px 0; }
 .world-os .wo-ch-avatar-large { width:82px; height:82px; border-radius:18px; font-size:34px; }
@@ -351,3 +352,54 @@
 #world-os .wo-lab-frame-host { min-height:180px; flex:1 1 auto; overflow:hidden; }
 #world-os .wo-lab-frame { display:block; width:100%; height:100%; border:0; border-radius:8px; background:#20262c; }
 #world-os .wo-lab-app .fm-status:empty { display:none; }
+
+/* Private wealth terminal: deliberately scoped to this app, including mobile tables. */
+#world-os .wo-finance-icon { color:#e0bb77; background:rgba(177,137,64,.18); }
+#world-os .wo-finance { --fin-line:#293a43; --fin-muted:#9aadb7; color:#e4edf2; background:#10191f; margin:-4px; padding:16px; border:1px solid #2d3b41; border-radius:12px; font-variant-numeric:tabular-nums; }
+#world-os .wo-finance h3,#world-os .wo-finance h4 { color:#f1ddb4; margin:6px 0 14px; }
+#world-os .wo-finance input,#world-os .wo-finance select,#world-os .wo-finance textarea { box-sizing:border-box; width:100%; min-width:0; color:#e4edf2; background:#15232c; border:1px solid #3b505d; }
+#world-os .wo-finance input[type=checkbox] { width:auto; }
+#world-os .wo-finance .menu_button { color:#e4edf2; background:#1b2c35; border:1px solid #41555f; cursor:pointer; min-height:40px; width:auto; max-width:100%; margin:0; }
+#world-os .wo-finance .wo-fin-primary { background:#a9884c; color:#111b22; font-weight:700; }
+#world-os .wo-finance .fm-hint { color:var(--fin-muted); opacity:1; line-height:1.65; }
+#world-os .wo-finance .fm-status:empty { display:none; }
+#world-os .wo-finance [data-level=error] { color:#ff9991; }
+#world-os .wo-fin-masthead,#world-os .wo-fin-section-title,#world-os .wo-fin-session { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+#world-os .wo-fin-masthead small { font:10px/1.5 ui-monospace,monospace; letter-spacing:2px; color:#bca478; }
+#world-os .wo-fin-masthead h3 { font:600 26px/1.5 Georgia,'Songti SC',serif; margin:6px 0; }
+#world-os .wo-fin-badge { font-size:11px; color:#d9bd83; border:1px solid #6f5c39; padding:5px 9px; border-radius:3px; }
+#world-os .wo-fin-master { display:flex; align-items:center; flex-wrap:wrap; gap:6px 16px; border-block:1px solid var(--fin-line); padding:10px 0; margin-top:10px; }
+#world-os .wo-fin-master label { min-height:36px; margin:0; gap:8px; }
+#world-os .wo-fin-master small { color:var(--fin-muted); font-size:11px; }
+#world-os .wo-fin-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:18px 0; }
+#world-os .wo-fin-metric { display:flex; flex-direction:column; gap:8px; min-width:0; padding:14px; background:#17252d; border:1px solid var(--fin-line); border-top:2px solid #b3955f; border-radius:4px; }
+#world-os .wo-fin-metric strong { font:600 clamp(15px,2.5vw,23px)/1.4 ui-monospace,monospace; overflow-wrap:anywhere; }
+#world-os .wo-fin-metric small { font-size:11px; color:var(--fin-muted); overflow-wrap:anywhere; }
+#world-os .wo-fin-up { color:#50cf9b; } #world-os .wo-fin-down { color:#ef7b78; }
+#world-os .wo-fin-session { margin:12px 0; font-size:12px; } #world-os .wo-fin-session > span { margin-right:auto; }
+#world-os .wo-fin-nav { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:2px; margin:20px 0; border-bottom:1px solid #43545c; }
+#world-os .wo-fin-nav button { background:none; color:var(--fin-muted); border:0; border-bottom:2px solid transparent; padding:12px 2px; min-height:44px; font:inherit; font-size:12px; cursor:pointer; }
+#world-os .wo-fin-nav [aria-current=page] { color:#f2d99e; border-bottom-color:#c9a360; background:#1a2930; }
+#world-os .wo-fin-panel { min-width:0; background:#142129; border:1px solid var(--fin-line); padding:16px; border-radius:5px; margin-bottom:14px; }
+#world-os .wo-fin-panel form { margin-top:12px; } #world-os .wo-fin-panel summary { cursor:pointer; min-height:30px; color:#ddc895; }
+#world-os .wo-fin-news { font-size:12px; color:#b2c3cd; border-left:2px solid #b3955f; padding:5px 10px; }
+#world-os .wo-fin-ticker { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin:12px 0 18px; }
+#world-os .wo-fin-ticker .wo-fin-metric { padding:8px; gap:3px; border-top:0; } #world-os .wo-fin-ticker .wo-fin-metric strong { font-size:14px; }
+#world-os .wo-fin-market-layout { display:grid; grid-template-columns:minmax(150px,1fr) minmax(0,2fr); gap:12px; align-items:start; }
+#world-os .wo-fin-watch-row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; min-height:42px; width:100%; min-width:0; background:transparent; border:0; border-bottom:1px solid #283940; color:#d4e0e6; cursor:pointer; font:12px ui-monospace,monospace; padding:12px 4px; text-align:right; }
+#world-os .wo-fin-watch-row strong { text-align:left; overflow-wrap:anywhere; } #world-os .wo-fin-watch-row[aria-current=true] { background:#263b46; }
+#world-os #wo-fin-chart { width:100%; height:auto; display:block; background:#0e1920; border-radius:4px; }
+#world-os #wo-fin-chart-price { font:14px ui-monospace,monospace; }
+#world-os .wo-fin-row { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; padding:14px 0; border-bottom:1px solid #2a3c45; }
+#world-os .wo-fin-row > div { display:flex; flex-direction:column; gap:7px; min-width:0; flex:1 1 130px; overflow-wrap:anywhere; }
+#world-os .wo-fin-row small { color:var(--fin-muted); font-size:12px; line-height:1.5; } #world-os .wo-fin-row-value { text-align:right; align-items:flex-end; }
+#world-os .wo-finance[data-busy] button { pointer-events:none; opacity:.6; }
+@media(max-width:650px) {
+    #world-os .wo-finance { padding:10px; }
+    #world-os .wo-fin-market-layout { grid-template-columns:minmax(0,1fr); }
+    #world-os #wo-fin-watch { max-height:240px; overflow:auto; }
+    #world-os .wo-fin-summary { gap:5px; }
+    #world-os .wo-fin-metric { padding:9px 6px; }
+    #world-os .wo-fin-panel { padding:12px; }
+    #world-os .wo-finance .menu_button { min-height:44px; }
+}

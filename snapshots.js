@@ -6,13 +6,14 @@ import { validateStateAPI } from './character-api.js';
 import { WORLD_KEY, announceWorldChange } from './world-state.js';
 import { downloadMemory } from './host-runtime.js';
 import { LAB_KEY, validateLabSettings, validateLabChat } from './laboratory-core.js';
+import { FINANCE_KEY, validateFinanceSettings, validateFinanceState } from './finance-core.js';
 import { createCharacterAssetStore, embedCharacterImages, migrateCharacterImages, hasEmbeddedCharacterImages } from './character-assets.js';
 
 export const SNAPSHOT_MAX_BYTES = 32*1024*1024;
 const sizeError = () => new Error('当前快照超过 32 MB（包含 CG 图片）。请使用酒馆完整数据备份保存大量图片；不会导出缺少图片的不完整快照。');
 
-const SETTINGS_KEYS = [WORLD_KEY,MODULE_KEY,CALENDAR_KEY,CHARACTERS_KEY,LAB_KEY];
-const CHAT_KEYS = [MODULE_KEY,CALENDAR_KEY,CHARACTERS_KEY,LAB_KEY];
+const SETTINGS_KEYS = [WORLD_KEY,MODULE_KEY,CALENDAR_KEY,CHARACTERS_KEY,LAB_KEY,FINANCE_KEY];
+const CHAT_KEYS = [MODULE_KEY,CALENDAR_KEY,CHARACTERS_KEY,LAB_KEY,FINANCE_KEY];
 const SECRET_PATHS = [
     [MODULE_KEY,'apiKey'],[MODULE_KEY,'rerankApiKey'],[MODULE_KEY,'aiKeywordApiKey'],[CHARACTERS_KEY,'api','apiKey'],
 ];
@@ -62,8 +63,8 @@ export function validateSnapshot(input) {
         || typeof data.includeKeys !== 'boolean' || !plainObject(data.settings) || !plainObject(data.metadata)) throw new Error('快照头或数据格式无效。');
     const [owner,chatId] = JSON.parse(data.scope);
     if (owner !== data.owner || chatId === null || chatId === undefined || chatId === '') throw new Error('快照聊天标识无效。');
-    if (Object.keys(data.settings).some(key => !SETTINGS_KEYS.includes(key)) || SETTINGS_KEYS.some(key => key !== LAB_KEY && !Object.hasOwn(data.settings,key))
-        || Object.keys(data.metadata).some(key => !CHAT_KEYS.includes(key)) || CHAT_KEYS.some(key => key !== LAB_KEY && !Object.hasOwn(data.metadata,key))) throw new Error('快照包含未知模块或缺少模块。');
+    if (Object.keys(data.settings).some(key => !SETTINGS_KEYS.includes(key)) || SETTINGS_KEYS.some(key => ![LAB_KEY,FINANCE_KEY].includes(key) && !Object.hasOwn(data.settings,key))
+        || Object.keys(data.metadata).some(key => !CHAT_KEYS.includes(key)) || CHAT_KEYS.some(key => ![LAB_KEY,FINANCE_KEY].includes(key) && !Object.hasOwn(data.metadata,key))) throw new Error('快照包含未知模块或缺少模块。');
     const global = data.settings[WORLD_KEY];
     if (global !== null && (!plainObject(global) || (global.enabled !== undefined && typeof global.enabled !== 'boolean'))) throw new Error('总开关配置无效。');
     const memory = data.settings[MODULE_KEY];
@@ -92,6 +93,8 @@ export function validateSnapshot(input) {
     }
     if (data.settings[LAB_KEY] != null) data.settings[LAB_KEY] = validateLabSettings(data.settings[LAB_KEY]);
     if (data.metadata[LAB_KEY] != null) data.metadata[LAB_KEY] = validateLabChat(data.metadata[LAB_KEY]);
+    if (data.settings[FINANCE_KEY] != null) data.settings[FINANCE_KEY] = validateFinanceSettings(data.settings[FINANCE_KEY]);
+    if (data.metadata[FINANCE_KEY] != null) data.metadata[FINANCE_KEY] = validateFinanceState(data.metadata[FINANCE_KEY]);
     const date = data.metadata[CALENDAR_KEY];
     if (date !== null) validateDate(date.date,validateCalendar(calendar?.cards?.[data.owner] ?? DEFAULT_CALENDAR).months);
     const records = data.metadata[MODULE_KEY];

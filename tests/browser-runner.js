@@ -213,7 +213,7 @@ try {
     await send('Page.navigate', { url:'http://127.0.0.1:' + port + '/tests/browser.html' + (tauri ? '?tauri=1' : '') });
     await send('Page.bringToFront');
     let result;
-    for (let attempt = 0; attempt < 800; attempt++) {
+    for (let attempt = 0; attempt < 1200; attempt++) {
         const evaluation = await send('Runtime.evaluate', { expression:'globalThis.__testResult', returnByValue:true });
         result = evaluation.result?.value;
         if (result) break;
@@ -346,7 +346,8 @@ try {
     await send('Runtime.evaluate', { expression: "if (!document.querySelector('#world-os').open) document.querySelector('#wo-launcher').click(); document.querySelector('#wo-back').click(); document.querySelector('.wo-window-body').scrollTop = 0; document.fonts.ready", awaitPromise:true, returnByValue:true });
     await send('Page.bringToFront');
     try {
-        for (const view of ['home', 'memory', 'calendar', 'calendar-time', 'characters', 'character-detail', 'character-api', 'character-debug', 'snapshot', 'character-defaults', 'character-cg', 'laboratory', 'laboratory-app', 'cg-chat']) {
+        for (const view of ['home', 'memory', 'calendar', 'calendar-time', 'characters', 'character-detail', 'character-api', 'character-debug', 'snapshot', 'character-defaults', 'character-cg', 'laboratory', 'laboratory-app', 'cg-chat', 'finance']) {
+            if (view === 'finance') await send('Runtime.evaluate',{expression:'globalThis.__showFinanceFixture()',returnByValue:true});
             if (view === 'memory') await send('Runtime.evaluate', { expression: "document.querySelector('#wo-open-floor-memory').click(); for (const section of document.querySelectorAll('#floor-memory details')) section.open = false; document.querySelector('.wo-window-body').scrollTop = 0;", returnByValue:true });
             if (view === 'calendar') await send('Runtime.evaluate', { expression: "document.querySelector('#wo-open-calendar').click(); document.querySelector('.wo-window-body').scrollTop = 0;", returnByValue:true });
             if (view === 'calendar-time') await send('Runtime.evaluate', { expression: "document.querySelector('#world-os').close(); document.querySelector('#wo-calendar-quick').click();", returnByValue:true });
