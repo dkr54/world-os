@@ -308,7 +308,7 @@
           <p class="fm-hint">永久启用后，不论有无关键词或是否命中，都会加入 {{character}}。关闭永久启用后，按原有关键词规则匹配。</p>
           <label>触发关键词<input id="wo-ch-keywords" class="text_pole" placeholder="示例角色甲,角色甲"></label>
           <p class="fm-hint">英文逗号分隔；中文逗号视为关键词的一部分。留空不匹配。查询直接使用最新两条用户或 AI 消息。</p>
-          <details><summary>角色图片</summary><label>图片网址<input id="wo-ch-avatar" class="text_pole" placeholder="https://…"></label><label>或从手机选择图片<input id="wo-ch-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label><p class="fm-hint">上传图片会缩小后保存，快照也会包含上传头像。</p><button id="wo-ch-avatar-clear" type="button" class="menu_button">移除图片</button></details>
+          <details><summary>角色图片</summary><label>图片网址<input id="wo-ch-avatar" class="text_pole" placeholder="https://…"></label><label>或从文件选择图片<input id="wo-ch-avatar-file" type="file" accept="*/*"></label><p class="fm-hint">上传图片会缩小后保存，快照也会包含上传头像。</p><button id="wo-ch-avatar-clear" type="button" class="menu_button">移除图片</button></details>
           <details id="wo-ch-cg-section"><summary>角色 CG 图片包</summary>
             <p class="fm-hint">每个包设置一个包名，可一次选择多张图片，也可添加 HTTP(S) 图片地址。回复中的 {{id.包名}} 会随机显示包内一张图片，同一楼同一包在本次打开聊天期间保持选图稳定。原始聊天与编辑内容始终保留宏文本。</p>
             <p class="fm-hint">本地图片逐张保存在酒馆自己的图片目录中，角色设置只保存地址。点击“预览图片”查看，每次最多加载一个包的 6 张图片；收起预览后释放。首次升级会自动整理旧图片，请等待完成后编辑。</p>

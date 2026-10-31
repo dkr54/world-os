@@ -159,8 +159,8 @@ export function mountCharacters(root, { getContext }) {
         // Keep embedded image bytes out of editable fields and the model's macro list.
         Object.defineProperty(row,'cgValue',{ get:() => ({ name:name.value.trim(),images:[...images],
             ...(aliases.length ? { aliases:aliases.map(alias => ({ ...alias })) } : {}) }) });
-        const file = field(controls,'批量添加图片'); file.type = 'file'; file.multiple = true;
-        file.accept = 'image/png,image/jpeg,image/webp,image/gif'; file.dataset.cgFile = '';
+        const file = field(controls,'从文件批量添加图片'); file.type = 'file'; file.multiple = true;
+        file.accept = '*/*'; file.dataset.cgFile = '';
         const source = field(controls,'添加图片地址（每行一个）','',true); source.rows = 2; source.dataset.cgSrc = ''; source.placeholder = 'https://…';
         const macro = el('code','wo-ch-cg-macro'), count = el('span','fm-hint'); count.dataset.cgCount = '';
         const showMacro = () => { macro.textContent = cgMacro({ cgId:Number(find('id').value) },{ name:name.value.trim() || '包名' }); };
