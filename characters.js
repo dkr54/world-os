@@ -6,7 +6,7 @@ import { DEFAULT_STATE_API, DEFAULT_STATE_PROMPTS, validateStateAPI, requestStat
 import { CharacterEngine } from './characters-engine.js';
 import { requestModels } from './embeddings.js';
 import { worldEnabled, WORLD_EVENT } from './world-state.js';
-import { cgMacro, validateCGSource, readCGFile, mountCGRenderer, validateCGFloors, DEFAULT_CG_FLOORS, MAX_CG_IMAGES } from './character-cg.js';
+import { cgMacro, validateCGSource, readCGFile, normalizeImageFile, mountCGRenderer, validateCGFloors, DEFAULT_CG_FLOORS, MAX_CG_IMAGES } from './character-cg.js';
 import { createCharacterAssetStore, hasEmbeddedCharacterImages, migrateCharacterImages } from './character-assets.js';
 
 const el = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
@@ -416,10 +416,13 @@ export function mountCharacters(root, { getContext }) {
     find('avatar-file').addEventListener('change',() => void action(async () => {
         const file = find('avatar-file').files[0], capturedOwner = definitionOwner, capturedId = selected;
         if (!file) return;
-        if (!['image/png','image/jpeg','image/webp','image/gif'].includes(file.type) || file.size > 12*1024*1024) throw new Error('请选择不超过 12 MB 的 PNG/JPEG/WebP/GIF 图片。');
-        const url = URL.createObjectURL(file);
+        const imageFile = await normalizeImageFile(file);
+        if (capturedOwner !== calendarOwner(getContext()) || capturedId !== selected) throw new DOMException('角色已变化','AbortError');
+        const url = URL.createObjectURL(imageFile);
         try {
-            const image = new Image(); image.src = url; await image.decode();
+            const image = new Image(); image.src = url;
+            try { await image.decode(); }
+            catch { throw new Error('当前浏览器无法解码“' + file.name + '”（' + imageFile.type + '），图片可能损坏或格式不受支持，请另存为 PNG/JPEG 后重试。'); }
             const ratio = Math.min(1,512/Math.max(image.width,image.height));
             const canvas = document.createElement('canvas'); canvas.width = Math.max(1,Math.round(image.width*ratio)); canvas.height = Math.max(1,Math.round(image.height*ratio));
             canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);

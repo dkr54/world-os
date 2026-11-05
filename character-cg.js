@@ -125,20 +125,47 @@ export function createCGPicker(random = Math.random) {
         },
     };
 }
-export async function readCGFile(file) {
-    if (!['image/png','image/jpeg','image/webp','image/gif'].includes(file.type) || file.size > 12 * 1024 * 1024) {
-        throw new Error('请选择不超过 12 MB 的 PNG/JPEG/WebP/GIF 图片。');
+export async function normalizeImageFile(file) {
+    const label = file.name ? '“' + file.name + '”' : '所选文件';
+    if (file.size > 12 * 1024 * 1024) throw new Error(label + '大小为 ' + (file.size / 1024 / 1024).toFixed(2) + ' MB，超过单张 12 MB 的导入上限。');
+    if (!file.size) throw new Error(label + '是空文件，请重新选择图片。');
+    let bytes;
+    try { bytes = new Uint8Array(await file.slice(0,64).arrayBuffer()); }
+    catch { throw new Error('无法读取' + label + '，请确认文件已下载到手机，再重新选择。'); }
+    const starts = values => values.every((value,index) => bytes[index] === value);
+    const ascii = (start,end) => String.fromCharCode(...bytes.subarray(start,end));
+    let type = starts([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]) ? 'image/png'
+        : starts([0xff,0xd8,0xff]) ? 'image/jpeg'
+        : ['GIF87a','GIF89a'].includes(ascii(0,6)) ? 'image/gif'
+        : ascii(0,4) === 'RIFF' && ascii(8,12) === 'WEBP' ? 'image/webp'
+        : starts([0x42,0x4d]) ? 'image/bmp'
+        : starts([0x49,0x49,0x2a,0]) || starts([0x4d,0x4d,0,0x2a]) ? 'image/tiff'
+        : starts([0,0,1,0]) ? 'image/x-icon' : '';
+    if (!type && ascii(4,8) === 'ftyp') {
+        const brands=[ascii(8,12)];for(let i=16;i+4<=bytes.length;i+=4)brands.push(ascii(i,i+4));
+        type=brands.some(brand=>['avif','avis'].includes(brand)) ? 'image/avif'
+            : brands.some(brand=>['heic','heix','hevc','hevx'].includes(brand)) ? 'image/heic'
+            : brands.some(brand=>['mif1','msf1'].includes(brand)) ? 'image/heif' : '';
     }
-    const source = await new Promise((resolve,reject) => {
-        const reader = new FileReader(); reader.onload = () => resolve(String(reader.result));
-        reader.onerror = () => reject(new Error('无法读取 CG 图片。')); reader.onabort = reader.onerror; reader.readAsDataURL(file);
-    });
-    // Preserve small originals, including animated GIF/WebP. Large still images get a mobile-friendly copy.
-    if (source.length <= MAX_CG_SOURCE) return validateCGSource(source);
-    if (file.type === 'image/gif') throw new Error('GIF 需小于约 1.4 MB 以保留动画；较大的动图可填写 HTTP(S) 图片地址。');
+    if (!type) throw new Error(label + '未识别为支持的图片格式，请选择 PNG/JPEG/WebP/GIF，或将这张图片另存为 PNG/JPEG 后重试。');
+    return file.type === type ? file : file.slice(0,file.size,type);
+}
+export async function readCGFile(file) {
+    const name = file.name ?? '所选图片';
+    file = await normalizeImageFile(file);
+    if (['image/png','image/jpeg','image/webp','image/gif'].includes(file.type)) {
+        const source = await new Promise((resolve,reject) => {
+            const reader = new FileReader(); reader.onload = () => resolve(String(reader.result));
+            reader.onerror = () => reject(new Error('无法读取 CG 图片“' + name + '”。')); reader.onabort = reader.onerror; reader.readAsDataURL(file);
+        });
+        if (source.length <= MAX_CG_SOURCE) return validateCGSource(source);
+        if (file.type === 'image/gif') throw new Error('GIF 需小于约 1.4 MB 以保留动画；较大的动图可填写 HTTP(S) 图片地址。');
+    }
     const image = new Image(), canvas = document.createElement('canvas'), url = URL.createObjectURL(file);
     try {
-        image.src = url; await image.decode();
+        image.src = url;
+        try { await image.decode(); }
+        catch { throw new Error('当前浏览器无法解码“' + name + '”（' + file.type + '），图片可能损坏或格式不受支持，请另存为 PNG/JPEG 后重试。'); }
         let edge = 2048;
         for (let attempt = 0; attempt < 4; attempt++, edge = Math.round(edge * .75)) {
             const ratio = Math.min(1,edge / Math.max(image.width,image.height));

@@ -64,6 +64,39 @@ export async function runCGChecks({check,assert,waitFor,delay,emit,getContext,se
         assert(!q('wo-ch-tokens').textContent.includes('999'),'old count leaked into another character');
         ctx.getTokenCountAsync=async()=>73;openMain();
     });
+    await check('文件选择器第 36 张返回通用类型时整包正常导入，空类型图片和头像也可保存',async()=>{
+        openMain();q('wo-ch-cg-section').open=true;q('wo-ch-cg-add').click();
+        const row=q('wo-ch-cgs').lastElementChild,bytes=await(await fetch(source)).arrayBuffer(),transfer=new DataTransfer();
+        const padded=new Uint8Array(Math.max(bytes.byteLength,350*1024));padded.set(new Uint8Array(bytes));
+        const bmp=new Uint8Array(350*1024),header=new DataView(bmp.buffer);bmp.set([0x42,0x4d]);header.setUint32(2,70,true);header.setUint32(10,54,true);header.setUint32(14,40,true);header.setInt32(18,2,true);header.setInt32(22,2,true);header.setUint16(26,1,true);header.setUint16(28,24,true);header.setUint32(34,16,true);bmp.set([0,0,255,0,255,0,0,0,255,0,0,255,255,255,0,0],54);
+        for(let index=0;index<37;index++)transfer.items.add(new File([index===35?bmp:padded],'batch-'+(index+1)+'.png',{type:index===35?'application/octet-stream':index===36?'':'image/png'}));
+        assert([...transfer.files].reduce((sum,file)=>sum+file.size,0)>12*1024*1024,'batch must exceed 12 MB in total');
+        const input=row.querySelector('[data-cg-file]');input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));
+        await waitFor(()=>row.cgValue.images.length===37,'36th generic-type image failed',15000);
+        assert(row.cgValue.images.every(src=>isLocalCharacterAsset(src)),'generic image not saved to host storage');
+        assert(row.cgValue.images[35].endsWith('.webp'),'BMP was not converted for storage');
+        const pictures=new DataTransfer();pictures.items.add(new File([bytes],'avatar.png',{type:'application/octet-stream'}));
+        q('wo-ch-avatar').value='';q('wo-ch-avatar-file').files=pictures.files;q('wo-ch-avatar-file').dispatchEvent(new Event('change',{bubbles:true}));
+        await waitFor(()=>q('wo-ch-avatar').value.startsWith('data:image/'),'generic avatar failed');
+        await submit();assert(person().cgs.at(-1).images.length===37,q('wo-ch-status').textContent);
+        const savedRow=q('wo-ch-cgs').lastElementChild;[...savedRow.querySelectorAll('button')].find(button=>button.textContent==='移除图片包').click();await submit();
+    });
+    await check('多重后缀 AVIF 转成 WebP 并保存，不受文件选择器类型标记影响',async()=>{
+        openMain();q('wo-ch-cg-section').open=true;q('wo-ch-cg-add').click();
+        const row=q('wo-ch-cgs').lastElementChild,response=await fetch(new URL('./fixtures/white_1x1.avif',import.meta.url));
+        assert(response.ok,'AVIF fixture unavailable');const bytes=await response.arrayBuffer(),transfer=new DataTransfer();
+        for(const type of ['image/avif','application/octet-stream','image/jpeg',''])transfer.items.add(new File([bytes],'sample.png.jpg.avif',{type}));
+        const input=row.querySelector('[data-cg-file]');input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}));
+        await waitFor(()=>row.cgValue.images.length===4,'AVIF import failed',15000);
+        assert(row.cgValue.images.every(src=>isLocalCharacterAsset(src)&&src.endsWith('.webp')),'AVIF was not converted and stored');
+        await submit();assert(person().cgs.at(-1).images.length===4,q('wo-ch-status').textContent);
+        const savedRow=q('wo-ch-cgs').lastElementChild;[...savedRow.querySelectorAll('button')].find(button=>button.textContent==='移除图片包').click();await submit();
+    });
+    await check('无法解码的图片提示文件名和格式，不伪报为超过 12 MB',async()=>{
+        const {readCGFile}=await import('../character-cg.js');let failure;
+        try {await readCGFile(new File([new Uint8Array([0x42,0x4d,0,0,0,0,0,0,0,0,0,0])],'broken.bmp',{type:'application/octet-stream'}));}catch(error){failure=error;}
+        assert(failure?.message.includes('broken.bmp')&&failure.message.includes('解码')&&!failure.message.includes('12 MB'),'decode error reported wrong cause');
+    });
     await check('同名角色可以保存并获得不同数字 ID，CG 宏按 ID 准确区分',async()=>{
         q('wo-ch-list-back').click();q('wo-ch-add').click();q('wo-ch-name').value='示例角色甲';q('wo-ch-keywords').value='第二位';
         q('wo-ch-description').value='同名角色';q('wo-ch-cg-add').click();await choose(q('wo-ch-cgs').lastElementChild,'晨光','#5d7456');

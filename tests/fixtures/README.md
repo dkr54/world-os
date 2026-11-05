@@ -1,0 +1,1 @@
+`white_1x1.avif` comes from [AOMediaCodec/libavif](https://github.com/AOMediaCodec/libavif/blob/main/tests/data/white_1x1.avif). Its original license is in `libavif-LICENSE.txt`. The fixture verifies AVIF decoding and conversion during CG import.

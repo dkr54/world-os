@@ -2,13 +2,49 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CHARACTERS_KEY,validateCharacter,validateDirectory,ensureCharacterIDs,nextCharacterID,renderCharacter,
     selectCharacters,characterTag,characterTokenCount,characterPrompt } from '../characters-core.js';
-import { CG_PATTERN,validateCGs,validateCGSource,cgPrompt,cgLookup,recentCGIndices,validateCGFloors,createCGPicker,MAX_CG_IMAGES } from '../character-cg.js';
+import { CG_PATTERN,validateCGs,validateCGSource,cgPrompt,cgLookup,recentCGIndices,validateCGFloors,createCGPicker,MAX_CG_IMAGES,normalizeImageFile } from '../character-cg.js';
 import { CharacterEngine } from '../characters-engine.js';
 import { createSnapshot,restoreSnapshot,validateSnapshot } from '../snapshots.js';
 import { memoryAssetHost } from './asset-store-fixture.js';
 import { WORLD_KEY } from '../world-state.js';
 
 const image='data:image/png;base64,aGVsbG8=';
+const pngBytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==','base64');
+test('文件选择器未给出或错误标注图片类型时，按文件内容恢复 PNG 类型且不改变字节',async()=>{
+    for(const type of ['', 'application/octet-stream', 'text/plain', 'image/jpg', 'image/png']) {
+        const file=new File([pngBytes],'sample.bin',{type});const normalized=await normalizeImageFile(file);
+        assert.equal(normalized.type,'image/png');assert.deepEqual(Buffer.from(await normalized.arrayBuffer()),pngBytes);
+        if(type==='image/png')assert.equal(normalized,file);
+    }
+});
+test('图片文件头支持 JPEG、两种 GIF 和 WebP，并拒绝伪装扩展名或类型的非图片',async()=>{
+    for(const [hex,type]of [['ffd8ffe000104a464946000101','image/jpeg'],['47494638376101000100800000','image/gif'],['47494638396101000100800000','image/gif'],['524946462a0000005745425056503820','image/webp']]){
+        const file=new File([Buffer.from(hex,'hex')],'image.dat',{type:'application/octet-stream'});
+        assert.equal((await normalizeImageFile(file)).type,type);
+    }
+    for(const bytes of ['not an image','RIFF1234WAVE','GIF8','<svg></svg>'])await assert.rejects(normalizeImageFile(new File([bytes],'fake.png',{type:'image/png'})),error=>error.message.includes('fake.png')&&error.message.includes('格式')&&!error.message.includes('12 MB'));
+});
+test('单张文件大小、空文件与读取失败分别提示，超限时不读取图片内容',async()=>{
+    const file=new File([pngBytes],'large.png',{type:'image/png'});Object.defineProperty(file,'size',{value:12*1024*1024+1});
+    file.slice=()=>{throw new Error('must not read oversized file');};
+    await assert.rejects(normalizeImageFile(file),error=>error.message.includes('large.png')&&error.message.includes('超过单张 12 MB'));
+    await assert.rejects(normalizeImageFile(new File([],'empty.png')),/空文件/);
+    await assert.rejects(normalizeImageFile({name:'unavailable.png',size:20,slice:()=>({arrayBuffer:async()=>{throw new Error('provider failure');}})}),/无法读取.*unavailable.png/);
+});
+test('从文件头识别 BMP、TIFF、ICO、AVIF 与 HEIF 系列，不依赖文件扩展名',async()=>{
+    const entries=[['424d460000000000000036000000','image/bmp'],['49492a0008000000','image/tiff'],['4d4d002a00000008','image/tiff'],['000001000100','image/x-icon'],
+        ['000000186674797061766966000000006d69663161766966','image/avif'],['00000018667479706d696631000000006176696669736f6d','image/avif'],
+        ['000000186674797068656963000000006d69663168656963','image/heic'],['00000014667479706d696631000000006d696631','image/heif']];
+    for(const [hex,type]of entries)assert.equal((await normalizeImageFile(new File([Buffer.from(hex,'hex')],'image.unknown',{type:''}))).type,type);
+});
+test('12 MB 限制按单张判断，超过 12 MB 的整包和第 36 张通用类型图片仍可逐张通过',async()=>{
+    for(let index=0;index<40;index++){
+        const file=new File([pngBytes,new Uint8Array(320*1024)],'image-'+index+'.png',{type:index===35?'application/octet-stream':'image/png'});
+        assert.equal((await normalizeImageFile(file)).type,'image/png');
+    }
+    const boundary=new File([pngBytes],'boundary.png',{type:'image/png'});Object.defineProperty(boundary,'size',{value:12*1024*1024});
+    assert.equal(await normalizeImageFile(boundary),boundary);
+});
 const make=(changes={})=>validateCharacter({id:'old-a',name:'角色A',keywords:'角色A',description:'年龄 {{age}}，{{user}}遇见{{char}}。',baseState:{age:20},...changes});
 function context(items=[make()]) {
     return {characterId:0,characters:[{avatar:'cg-card.png'}],name1:'用户',name2:'主角',chatId:'one',chat:[{mes:'角色A',is_user:true}],chatMetadata:{},
