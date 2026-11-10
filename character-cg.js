@@ -3,7 +3,7 @@ import { isLocalCharacterAsset } from './character-assets.js';
 /** Settings keep host-local image paths. Only rendered chat DOM is changed. */
 export const CG_PATTERN = /\{\{(0|[1-9]\d*)\.([^{}\r\n<>]{1,100})\}\}/g;
 export const MAX_CG_SOURCE = 2000000;
-export const MAX_CG_IMAGES = 200;
+const MAX_CG_PACKS = 200;
 export const DEFAULT_CG_FLOORS = 10;
 export function validateCGFloors(value = DEFAULT_CG_FLOORS) {
     if (!Number.isInteger(value) || value < 0 || value > 1000) throw new Error('CG 显示楼数必须为 0～1000 的整数。');
@@ -38,8 +38,8 @@ function validateCGName(name) {
     return name;
 }
 export function validateCGs(value = []) {
-    if (!Array.isArray(value) || value.length > MAX_CG_IMAGES) throw new Error('每个角色最多设置 200 个 CG 图片包，共 200 张图片。');
-    const reserved = new Set(), groups = new Map(), packs = []; let total = 0;
+    if (!Array.isArray(value)) throw new Error('CG 图片包必须是列表。');
+    const reserved = new Set(), groups = new Map(), packs = [];
     for (const item of value) {
         validateCGName(item?.name);
         if (reserved.has(item.name)) throw new Error('同一个角色的 CG 包名不能重复：' + item.name);
@@ -48,8 +48,6 @@ export function validateCGs(value = []) {
     for (const item of value) {
         const legacy = !Object.hasOwn(item,'images'), sources = legacy ? [item.src] : item.images;
         if (!Array.isArray(sources) || !sources.length) throw new Error('CG 图片包至少需要一张图片：' + item.name);
-        total += sources.length;
-        if (total > MAX_CG_IMAGES) throw new Error('每个角色的 CG 图片合计不能超过 200 张。');
         const images = sources.map(validateCGSource);
         // Strip only a legacy image's trailing digits. Explicitly named new packs stay intact.
         const base = legacy ? item.name.match(/^(.*\D)[0-9]+$/)?.[1].trim() : null;
@@ -67,7 +65,7 @@ export function validateCGs(value = []) {
             pack.aliases.push({ name:item.name,index:pack.images.length }); pack.images.push(...images);
         } else {
             const pack = { name:item.name,images }, aliases = item.aliases ?? [];
-            if (!Array.isArray(aliases) || aliases.length > MAX_CG_IMAGES) throw new Error('旧 CG 宏映射格式无效。');
+            if (!Array.isArray(aliases)) throw new Error('旧 CG 宏映射格式无效。');
             if (aliases.length) pack.aliases = aliases.map(alias => {
                 validateCGName(alias?.name);
                 if (!Number.isInteger(alias.index) || alias.index < 0 || alias.index >= images.length) throw new Error('旧 CG 宏指向了不存在的图片。');
@@ -75,6 +73,7 @@ export function validateCGs(value = []) {
             });
             packs.push(pack);
         }
+        if (packs.length > MAX_CG_PACKS) throw new Error('每个角色最多设置 ' + MAX_CG_PACKS + ' 个 CG 图片包。');
     }
     const macroNames = new Set(packs.map(pack => pack.name));
     for (const pack of packs) for (const alias of pack.aliases ?? []) {

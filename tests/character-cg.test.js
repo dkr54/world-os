@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CHARACTERS_KEY,validateCharacter,validateDirectory,ensureCharacterIDs,nextCharacterID,renderCharacter,
     selectCharacters,characterTag,characterTokenCount,characterPrompt } from '../characters-core.js';
-import { CG_PATTERN,validateCGs,validateCGSource,cgPrompt,cgLookup,recentCGIndices,validateCGFloors,createCGPicker,MAX_CG_IMAGES,normalizeImageFile } from '../character-cg.js';
+import { CG_PATTERN,validateCGs,validateCGSource,cgPrompt,cgLookup,recentCGIndices,validateCGFloors,createCGPicker,normalizeImageFile } from '../character-cg.js';
 import { CharacterEngine } from '../characters-engine.js';
 import { createSnapshot,restoreSnapshot,validateSnapshot } from '../snapshots.js';
 import { memoryAssetHost } from './asset-store-fixture.js';
@@ -78,24 +78,29 @@ test('已编号旧 CG 自动转为同名单图包，宏与状态保持原样，�
     assert.equal(JSON.stringify([ctx.chat,ctx.chatMetadata]),before);
     ensureCharacterIDs(ctx);assert.equal(saves,0);
 });
-test('图片包保存多张图片并拒绝空包、坏图片与超出原有角色总图片数限制',()=>{
+test('每个角色可保存超过 200 张 CG，仍校验图片来源、包名和 200 个包的上限',()=>{
     const images=[image,'https://example.com/two.webp'];
     assert.deepEqual(validateCGs([{name:'日常',images}]),[{name:'日常',images}]);
     for(const sources of [[],null,'bad',[image,'javascript:bad()'],[{src:image}]])assert.throws(()=>validateCGs([{name:'日常',images:sources}]));
     assert.throws(()=>validateCGs([{name:'同名',images},{name:'同名',images}]),/重复/);
-    assert.equal(validateCGs([{name:'上限',images:Array(MAX_CG_IMAGES).fill(image)}])[0].images.length,MAX_CG_IMAGES);
-    assert.throws(()=>validateCGs([{name:'上限',images:Array(MAX_CG_IMAGES).fill(image)},{name:'多余',images:[image]}]),/200/);
+    const packs = Array.from({length:200}, (_,index) => ({name:'包'+index,images:[image]}));
+    packs[0].images = Array.from({length:1000}, (_,index) => 'https://example.com/'+index+'.webp');
+    assert.deepEqual(validateCGs(packs),packs);
+    assert.throws(()=>validateCGs([...packs,{name:'额外的包',images:[image]}]),/200 个 CG 图片包/);
 });
 test('旧 CG 按末尾完整数字合并同前缀，单图保留；只向模型公开包名，历史宏精确指向旧图',()=>{
     const second='https://example.com/two.png';
     const legacy=[{name:'休闲装1',src:image},{name:'泳装12',src:second},{name:'休闲装2',src:second},
-        {name:'肖像',src:image},{name:'123',src:image},{name:'第2章夜景3',src:image}];
+        {name:'肖像',src:image},{name:'123',src:image},{name:'第2章夜景3',src:image},
+        ...Array.from({length:199},(_,i)=>({name:'休闲装'+(i+3),src:'https://example.com/'+(i+3)+'.webp'}))];
     const ctx=context([{...make({cgId:0}),cgs:legacy}]);ensureCharacterIDs(ctx);
     const character=ctx.extensionSettings[CHARACTERS_KEY].cards['character:cg-card.png'][0];
     assert.deepEqual(character.cgs.map(pack=>pack.name),['休闲装','泳装','肖像','123','第2章夜景']);
-    assert.deepEqual(character.cgs[0].images,[image,second]);
+    const expectedImages = legacy.filter(item => item.name.startsWith('休闲装')).map(item => item.src);
+    assert.deepEqual(character.cgs[0].images,expectedImages);
     const lookup=cgLookup([character]);
-    assert.deepEqual(lookup.get('{{0.休闲装}}').images,[image,second]);
+    assert.deepEqual(lookup.get('{{0.休闲装}}').images,expectedImages);
+    assert.deepEqual(lookup.get('{{0.休闲装201}}').images,['https://example.com/201.webp']);
     assert.deepEqual(lookup.get('{{0.休闲装1}}').images,[image]);
     assert.deepEqual(lookup.get('{{0.休闲装2}}').images,[second]);
     assert(cgPrompt([character]).includes('{{0.泳装}}'));assert(!cgPrompt([character]).includes('{{0.泳装12}}'));

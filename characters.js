@@ -6,7 +6,7 @@ import { DEFAULT_STATE_API, DEFAULT_STATE_PROMPTS, validateStateAPI, requestStat
 import { CharacterEngine } from './characters-engine.js';
 import { requestModels } from './embeddings.js';
 import { worldEnabled, WORLD_EVENT } from './world-state.js';
-import { cgMacro, validateCGSource, readCGFile, normalizeImageFile, mountCGRenderer, validateCGFloors, DEFAULT_CG_FLOORS, MAX_CG_IMAGES } from './character-cg.js';
+import { cgMacro, validateCGSource, readCGFile, normalizeImageFile, mountCGRenderer, validateCGFloors, DEFAULT_CG_FLOORS } from './character-cg.js';
 import { createCharacterAssetStore, hasEmbeddedCharacterImages, migrateCharacterImages } from './character-assets.js';
 
 const el = (tag, cls, text) => { const node = document.createElement(tag); if (cls) node.className = cls; if (text !== undefined) node.textContent = text; return node; };
@@ -196,11 +196,11 @@ export function mountCharacters(root, { getContext }) {
                 navigation.append(previous,el('span','fm-hint',(previewPage+1) + ' / ' + Math.ceil(images.length/6)),next); gallery.append(navigation);
             }
         };
-        const checkCount = length => {
-            const total = [...find('cgs').children].reduce((sum,item) => sum + item.cgValue.images.length,0);
-            if (total + length > MAX_CG_IMAGES) throw new Error('每个角色的 CG 图片合计不能超过 200 张。');
+        const appendImages = sources => {
+            const validated = sources.map(validateCGSource);
+            for (const src of validated) images.push(src);
+            show();
         };
-        const appendImages = sources => { checkCount(sources.length); images.push(...sources.map(validateCGSource)); show(); };
         name.addEventListener('input',showMacro);
         file.addEventListener('change',() => void action(async () => {
             const files = [...file.files], version = detailVersion, capturedOwner = definitionOwner;
@@ -210,7 +210,7 @@ export function mountCharacters(root, { getContext }) {
                 if (!row.isConnected || version !== detailVersion || capturedOwner !== calendarOwner(getContext())) throw new DOMException('角色已变化','AbortError');
             };
             try {
-                checkCount(files.length); const sources = [];
+                const sources = [];
                 // Read/compress sequentially to avoid large simultaneous allocations on Android.
                 for (const [index,selectedFile] of files.entries()) {
                     ensureCurrent(); say('正在读取图片 ' + (index + 1) + ' / ' + files.length + '…');

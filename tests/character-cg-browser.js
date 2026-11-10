@@ -92,6 +92,25 @@ export async function runCGChecks({check,assert,waitFor,delay,emit,getContext,se
         await submit();assert(person().cgs.at(-1).images.length===4,q('wo-ch-status').textContent);
         const savedRow=q('wo-ch-cgs').lastElementChild;[...savedRow.querySelectorAll('button')].find(button=>button.textContent==='移除图片包').click();await submit();
     });
+    await check('一个包有 200 张时可从文件选择器追加第 201 张，保存后重新打开仍可用',async()=>{
+        openMain();
+        q('wo-ch-cg-section').open=true;
+        q('wo-ch-cg-add').click();
+        const row=q('wo-ch-cgs').lastElementChild;
+        row.querySelector('[data-cg-name]').value='多图';
+        row.querySelector('[data-cg-src]').value=Array.from({length:200},(_,i)=>'https://example.invalid/'+i+'.png').join('\n');
+        [...row.querySelectorAll('button')].find(button=>button.textContent==='添加图片地址').click();
+        await waitFor(()=>row.cgValue.images.length===200,'不能批量添加图片地址');
+        await choose(row,'第201张','#554433');
+        const added=row.cgValue.images[200];
+        assert(isLocalCharacterAsset(added),'第 201 张未存入本地图片目录');
+        await submit();
+        openMain();
+        const savedRow=q('wo-ch-cgs').lastElementChild, pack=savedRow.cgValue;
+        assert(pack.images.length===201 && pack.images[200]===added,'重新打开时第 201 张丢失');
+        [...savedRow.querySelectorAll('button')].find(button=>button.textContent==='移除图片包').click();
+        await submit();
+    });
     await check('无法解码的图片提示文件名和格式，不伪报为超过 12 MB',async()=>{
         const {readCGFile}=await import('../character-cg.js');let failure;
         try {await readCGFile(new File([new Uint8Array([0x42,0x4d,0,0,0,0,0,0,0,0,0,0])],'broken.bmp',{type:'application/octet-stream'}));}catch(error){failure=error;}
