@@ -517,21 +517,30 @@ try {
         input.dispatchEvent(new Event('input'));
         await waitFor(() => document.querySelector('#fm-status').textContent.includes('自动保存第 4 楼'), 'clear test keyword');
     });
-    await check('查询最近两条用户消息时，中间模型正文可以触发关键词；一条时不会', async () => {
+    await check('最新用户正文优先命中，剩余名额按 D 范围匹配中间模型正文', async () => {
         const originalChat = structuredClone(ctx.chat);
         const config = ctx.extensionSettings[MODULE_KEY];
-        const previous = { queryFloors:config.queryFloors, vectorEnabled:config.vectorEnabled };
+        const previous = { queryFloors:config.queryFloors, vectorEnabled:config.vectorEnabled, recallCount:config.recallCount };
         const input = document.querySelectorAll('.fm-record')[2].querySelector('[data-field="keywords"]');
         input.value = '21';
         input.dispatchEvent(new Event('input'));
         ctx.chat.at(-2).mes = '<thinking>隐藏内容</thinking><content>这里有线索 21</content><summary>' + texts[7] + '</summary>';
-        ctx.chat.at(-1).mes = '继续追问';
+        ctx.chat.at(-1).mes = '<thinking>21</thinking>去找星钥';
+        config.recallCount = 1;
         config.queryFloors = 2;
         config.vectorEnabled = false;
+        const priority = await generate();
+        assert(priority.some(message => message.mes.startsWith('[历史召回 · 第 2 楼]')), 'latest user keyword lost to newer assistant-only match');
+        ctx.chat.at(-1).mes = '继续追问';
         const output = await generate();
         assert(output.some(message => message.mes.startsWith('[历史召回 · 第 3 楼]')), 'assistant keyword missing from D=2 query');
         config.queryFloors = 1;
         assert(!(await generate()).some(message => message.mes.startsWith('[历史召回')), 'D=1 included earlier assistant');
+        config.queryFloors = 2;
+        ctx.chat.at(-3).mes = '之前提到 21';
+        ctx.chat.at(-2).mes = '星钥<summary>' + texts[7] + '</summary>';
+        ctx.chat.at(-1).mes = '<thinking>星钥</thinking>';
+        assert((await generate()).some(message => message.mes.startsWith('[历史召回 · 第 3 楼]')), 'empty latest user text gave the assistant priority');
         ctx.chat = originalChat;
         Object.assign(config, previous);
     });

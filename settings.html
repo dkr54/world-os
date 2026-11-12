@@ -76,7 +76,7 @@
           <label class="checkbox_label"><input type="checkbox" name="keywordEnabled">启用关键词召回</label>
           <label>查询最近几条用户消息 D（含中间模型回复）<input class="text_pole" type="number" name="queryFloors" min="0" max="10000" required></label>
           <p class="fm-hint">从最新第 1 条用户消息往上，取到第 D 条用户消息，包含两者之间的全部模型回复。D=2 即“上条用户消息 → 中间模型回复 → 最新用户消息”；D=0 只取尚未得到回复的用户消息。</p>
-          <p class="fm-hint">匹配每楼已设置的触发关键词（手动或 AI 生成），任意一个词命中即可候选。从最近的命中楼层往前选，最多 K 楼，不按命中词数量排序。满 K 楼后不请求向量或重排；不足时由未命中的旧楼层补足。空关键词不参与关键词匹配。</p>
+          <p class="fm-hint">先用最新一条用户消息匹配每楼已设置的触发词（手动或 AI 生成）。不足 K 楼时，再用完整查询文本匹配其余楼层。每轮都优先选楼层号较高的命中楼层，同一楼只选一次。仍有空位时才用完整查询文本进行向量召回。空关键词不参与关键词匹配。</p>
         </details>
         <details id="fm-embedding-panel">
           <summary>③ 独立 Embedding 接口</summary>

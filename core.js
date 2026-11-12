@@ -380,15 +380,20 @@ export function rankKeywords(records, query, settings) {
         .sort((a, b) => b.record.floor - a.record.floor);
 }
 
-/** Keyword matches always win. Vector search only sees unmatched old floors. */
-export async function retrieveMemories(records, query, settings, vectorSearch) {
+/** Match the latest user message first, then the full query. Vectors only see remaining floors. */
+export async function retrieveMemories(records, query, settings, vectorSearch, latestUserQuery = query) {
     const limit = settings.recallCount;
     if (!limit || !query.trim()) return { hits: [], warning: '' };
-    const available = records.filter(record => summaryOf(record));
-    const keywordHits = rankKeywords(available, query, settings);
-    const selected = keywordHits.slice(0, limit);
-    const allKeywordIds = new Set(keywordHits.map(hit => hit.record.id));
-    const remainder = available.filter(record => !allKeywordIds.has(record.id));
+    let remainder = records.filter(record => summaryOf(record));
+    let selected = [];
+    for (const text of new Set([latestUserQuery, query])) {
+        const hits = rankKeywords(remainder, text, settings);
+        if (!hits.length) continue;
+        selected = selected.concat(hits.slice(0, limit - selected.length));
+        if (selected.length === limit) break;
+        const matchedIds = new Set(hits.map(hit => hit.record.id));
+        remainder = remainder.filter(record => !matchedIds.has(record.id));
+    }
     let warning = '';
     if (selected.length < limit && settings.vectorEnabled && remainder.length && vectorSearch) {
         try {

@@ -186,6 +186,7 @@ async function planInjection(prompt, type, signal) {
     const oldRecords = next.filter(record => oldIds.has(record.id));
     const inputs = queryInputs(projection, config.queryFloors);
     const processedQuery = await regexRunner.runBatches(inputs, config, signal);
+    const latestUserQuery = processedQuery.at(-1)?.dialogue ?? '';
     const query = processedQuery.map(item => item.dialogue).filter(Boolean).join('\n\n');
     const vectorSearch = async (candidates, text, count) => {
         status('关键词不足，正在检索 ' + candidates.length + ' 楼的向量…');
@@ -196,7 +197,7 @@ async function planInjection(prompt, type, signal) {
         if (config.rerankEnabled && hits.length > count) status('正在重排 ' + hits.length + ' 楼向量候选…');
         return rerankVectorCandidates(hits, text, count, config, rerankApiKey(config), { signal });
     };
-    const { hits, warning } = await retrieveMemories(oldRecords, query, config, vectorSearch);
+    const { hits, warning } = await retrieveMemories(oldRecords, query, config, vectorSearch, latestUserQuery);
     ensureCurrent(expectedRevision, scope, signal);
     if (chatFingerprint(context().chat) !== chatFingerprint(rawSnapshot)) {
         throw new DOMException('消息已变化，本次注入已取消。', 'AbortError');

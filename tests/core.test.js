@@ -153,6 +153,28 @@ test('关键词超过 K 时较新楼层优先，旧楼匹配更多词也不能�
     assert.equal(calls, 0);
     assert.deepEqual(candidates, before);
 });
+test('最新用户命中先占 K 个名额，完整查询补关键词后才用向量', async () => {
+    const latest = '去找银钥匙。';
+    const query = '上一轮提到了灯塔。\n\n' + latest;
+    const candidates = [
+        record('key', 3, '发现钥匙', ['银钥匙']),
+        record('both', 8, '钥匙的位置', ['灯塔', '银钥匙']),
+        record('tower', 35, '旧航线', ['灯塔']),
+        record('tower2', 40, '新航线', ['灯塔']),
+        record('other', 50, '港口记录', []),
+    ];
+    const requests = [];
+    const vector = async (remaining, text, count) => {
+        requests.push([remaining.map(item => item.floor), text, count]);
+        return [{ record: candidates[4], score: 0.9 }];
+    };
+    for (const [limit, expected] of [[1, [8]], [2, [3, 8]], [3, [3, 8, 40]], [5, [3, 8, 35, 40, 50]]]) {
+        const { hits } = await retrieveMemories(candidates, query, config({ recallCount: limit }), vector, latest);
+        assert.deepEqual(hits.map(hit => hit.record.floor), expected);
+        assert.deepEqual(hits.find(hit => hit.record.floor === 8).matched, ['银钥匙']);
+    }
+    assert.deepEqual(requests, [[[50], query, 1]]);
+});
 test('向量只接收未匹配楼层，补足 K 并按楼层顺序注入', async () => {
     const a = record('a', 1, 'old', ['旧事']);
     const b = record('b', 2, 'match', ['星钥']);
