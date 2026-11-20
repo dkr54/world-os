@@ -253,6 +253,7 @@
 .world-os .wo-ch-contact:hover,.world-os .wo-ch-contact:focus-visible { background:rgba(128,128,128,.12); }
 .world-os .wo-ch-avatar { width:50px; height:50px; border-radius:12px; overflow:hidden; flex-shrink:0; background:rgba(100,151,139,.2); display:flex; align-items:center; justify-content:center; font-size:22px; }
 .world-os .wo-ch-avatar img { width:100%; height:100%; object-fit:cover; }
+.world-os .wo-ch-avatar-initial { background:#7956b3; color:#fff; font-weight:500; line-height:1; }
 .world-os .wo-ch-contact-text { display:flex; min-width:0; flex:1; flex-direction:column; gap:5px; }
 .world-os .wo-ch-contact-text strong { font-size:1.05em; font-weight:600; overflow-wrap:anywhere; }
 .world-os .wo-ch-contact-text small { opacity:.65; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }

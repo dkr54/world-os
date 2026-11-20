@@ -23,11 +23,24 @@ function selectField(parent, title, options, value) {
 }
 const jsonText = value => JSON.stringify(value,null,2);
 function parseJSON(text, label) { try { return JSON.parse(text); } catch { throw new Error(label + '不是合法 JSON。'); } }
+const nameSegments = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter() : null;
 function avatar(container, character) {
     container.replaceChildren();
-    if (!character?.avatar) { const icon = el('i','fa-solid fa-user'); icon.setAttribute('aria-hidden','true'); container.append(icon); return; }
+    container.classList.remove('wo-ch-avatar-initial');
+    if (!character.avatar) {
+        const name = character.name.trim();
+        if (name) {
+            container.classList.add('wo-ch-avatar-initial');
+            container.textContent = nameSegments?.segment(name).containing(0).segment ?? String.fromCodePoint(name.codePointAt(0));
+        } else {
+            const icon = el('i','fa-solid fa-user');
+            icon.setAttribute('aria-hidden','true');
+            container.append(icon);
+        }
+        return;
+    }
     const img = el('img'); img.alt = character.name; img.src = character.avatar; img.loading = 'lazy'; img.referrerPolicy = 'no-referrer';
-    img.addEventListener('error',() => { container.replaceChildren(el('i','fa-solid fa-user')); },{ once:true }); container.append(img);
+    img.addEventListener('error',() => img.replaceWith(el('i','fa-solid fa-user')),{ once:true }); container.append(img);
 }
 export function mountCharacters(root, { getContext }) {
     const page = root.querySelector('#wo-characters'), find = name => page.querySelector('#wo-ch-' + name);
@@ -411,8 +424,10 @@ export function mountCharacters(root, { getContext }) {
         if (!character || !globalThis.confirm('删除角色“' + character.name + '”的共享设定？')) return;
         await saveDirectory(directoryOf(getContext()).filter(item => item.id !== selected)); selected = ''; setView('list'); say('角色已删除。');
     }));
-    find('avatar').addEventListener('change',() => avatar(find('avatar-preview'),{ name:find('name').value,avatar:find('avatar').value }));
-    find('avatar-clear').addEventListener('click',() => { find('avatar').value = ''; find('avatar-file').value = ''; avatar(find('avatar-preview')); });
+    const refreshAvatar = () => avatar(find('avatar-preview'),{ name:find('name').value,avatar:find('avatar').value });
+    find('name').addEventListener('input',() => { if (!find('avatar').value) refreshAvatar(); });
+    find('avatar').addEventListener('change',refreshAvatar);
+    find('avatar-clear').addEventListener('click',() => { find('avatar').value = ''; find('avatar-file').value = ''; refreshAvatar(); });
     find('avatar-file').addEventListener('change',() => void action(async () => {
         const file = find('avatar-file').files[0], capturedOwner = definitionOwner, capturedId = selected;
         if (!file) return;
@@ -428,7 +443,7 @@ export function mountCharacters(root, { getContext }) {
             canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);
             if (capturedOwner !== calendarOwner(getContext()) || capturedId !== selected) throw new DOMException('角色已变化','AbortError');
             find('avatar').value = canvas.toDataURL('image/webp',.82);
-            avatar(find('avatar-preview'),{ name:find('name').value,avatar:find('avatar').value });
+            refreshAvatar();
             say('图片已载入，保存角色后生效。');
         } finally { URL.revokeObjectURL(url); }
     }));

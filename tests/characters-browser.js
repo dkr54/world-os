@@ -16,7 +16,7 @@ export async function runCharacterChecks({ check, assert, waitFor, delay, emit, 
     const tab=name=>document.querySelector('[data-ch-tab="'+name+'"]').click();
     const characters=()=>getContext().extensionSettings[CHARACTERS_KEY].cards['character:directory-guide.png']??[];
     let mainId;
-    await check('角色目录使用通讯录图标，保存头像、状态与阶段，中文按拼音排序',async()=>{
+    await check('角色目录优先显示上传头像，无头像用紫底白字首字，并按拼音排序',async()=>{
         assert(q('wo-open-characters').querySelector('.fa-address-book'),'contact icon missing');
         assert(q('world-os').dataset.page==='characters','directory page missing');
         q('wo-ch-add').click();q('wo-ch-name').value='示例角色甲';q('wo-ch-keywords').value='示例角色甲,角色甲';
@@ -42,7 +42,19 @@ export async function runCharacterChecks({ check, assert, waitFor, delay, emit, 
         q('wo-ch-description').value='苏岚，年龄 {{age}}。';await submit('wo-ch-definition-form');
         q('wo-ch-list-back').click();
         assert(q('wo-ch-list').querySelector('.wo-ch-contact strong').textContent==='示例角色甲','pinyin sorting incorrect');
-        assert(q('wo-ch-list').querySelectorAll('.wo-ch-avatar').length===2,'avatars missing');
+        const [uploaded, fallback] = q('wo-ch-list').querySelectorAll('.wo-ch-avatar');
+        assert(uploaded.querySelector('img') && !uploaded.textContent, 'uploaded avatar must take priority');
+        assert(fallback.textContent === '苏' && !fallback.querySelector('img'), 'missing avatar must show the first character');
+        const fallbackStyle = getComputedStyle(fallback);
+        assert(fallbackStyle.backgroundColor === 'rgb(121, 86, 179)' && fallbackStyle.color === 'rgb(255, 255, 255)', 'fallback must have a purple background and white text');
+        uploaded.closest('.wo-ch-contact').click();
+        q('wo-ch-avatar-clear').click();
+        const preview = q('wo-ch-avatar-preview');
+        assert(preview.textContent === '示' && !preview.querySelector('img'), 'clearing an avatar must reveal the name initial');
+        q('wo-ch-name').value = '刘xx';
+        q('wo-ch-name').dispatchEvent(new Event('input', { bubbles:true }));
+        assert(preview.textContent === '刘', 'default avatar must follow the edited name');
+        q('wo-ch-list-back').click();
     });
     await check('列表红绿图标与匹配开关、空关键词同步，无需进入详情即可辨认',async()=>{
         const first=()=>q('wo-ch-list').querySelector('.wo-ch-contact');
